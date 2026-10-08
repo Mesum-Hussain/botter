@@ -1,0 +1,11 @@
+{
+  "description": "List what is embedded in a built .bot file (files and tools with their sizes) and verify its checksum. Use it to confirm a build contains what you expect.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "file": {"type": "string", "description": "Path of the .bot file, inside the working directory."}
+    },
+    "required": ["file"]
+  },
+  "timeout_s": 30
+}

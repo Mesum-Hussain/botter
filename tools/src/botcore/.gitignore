@@ -1,0 +1,17 @@
+# Build output
+/botcore
+/botcore-static
+/obj-musl/
+/obj/
+
+# Secrets (never commit these)
+*.pem
+*.key
+.env
+
+# Editor
+.vscode/
+.idea/
+*~
+*.swp
+*.o

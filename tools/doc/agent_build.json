@@ -1,0 +1,12 @@
+{
+  "description": "Build an agent project into a single self-contained executable '<project folder name>.bot' (the botcore runtime plus the project's manifest.md, agent.md, skills/, tools/doc/ and tools/bin/ appended read-only). Validates tools first and reports errors and warnings. Use dry_run=true to only validate. The project and the output must be inside the working directory. No compiler is involved.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "dir": {"type": "string", "description": "Agent project directory, relative to the working directory. Default: the working directory itself."},
+      "output": {"type": "string", "description": "Output file path inside the working directory. Default: ./<name of the project folder>.bot"},
+      "dry_run": {"type": "boolean", "description": "Only validate the project, write nothing. Default false."}
+    }
+  },
+  "timeout_s": 120
+}
