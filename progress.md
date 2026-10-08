@@ -107,6 +107,7 @@ BOTTER DESIGN (brainstorm only, NOT locked; owner has not decided details): bott
 - Rebuild: `make clean && make`; static: `make release` (Makefile globs src/*.c; new .c files need no Makefile edit). Never mix dev/release objs (separate obj/ and obj-musl/).
 - Errors to stderr / user-facing messages via main.c helpers. Never log keys.
 - No new persistence; no host-file reads outside context dir (CA bundle/config from VFS).
+- GIT [D 2026-10-08]: repo = ~/Code/botter (public, https://github.com/Mesum-Hussain/botter, branch main; botcore/pack are plain folders under tools/src, old botcore history in /tmp/opencode/botcore-git-backup.tar.gz). Owner authorised: COMMIT AND PUSH after each major update (finished feature/phase), not after trivial edits. gh is logged in (credential helper), global git user configured. Check git status/diff first, stage only intended files, never commit secrets (pac.md is ignored), no force-push/history rewrite without being asked.
 - Prefer editing over creating files. Update THIS file each session (§7 status, §8 issues, §9 plan). Keep terse.
 
 ## 11a. BOTTER PROJECT [DONE 2026-10-08, Ph5a] (repo root = ~/Code/botter, itself an agent project)
