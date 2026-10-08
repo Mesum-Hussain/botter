@@ -339,6 +339,7 @@ static int cmd_manifest(const cJSON *args)
         }
         free(bf);
         char *desc = NULL;
+        int   net = 0;
         if (file_exists(dir, dp)) {
             char *jf = join(dir, dp);
             int   saved = errors;
@@ -348,6 +349,7 @@ static int cmd_manifest(const cJSON *args)
             cJSON *j = jt ? cJSON_Parse(jt) : NULL;
             const cJSON *d = cJSON_GetObjectItemCaseSensitive(j, "description");
             desc = xstrdup(cJSON_IsString(d) ? d->valuestring : "(descriptor has no description)");
+            net = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j, "network"));
             cJSON_Delete(j);
             free(jt);
             free(jf);
@@ -355,7 +357,7 @@ static int cmd_manifest(const cJSON *args)
             desc = xstrdup("(no descriptor: this tool will NOT load)");
         }
         one_line(desc, 240);
-        sb_add(&g, "- %s [%s]: %s", bv[i], kind, desc);
+        sb_add(&g, "- %s [%s%s]: %s", bv[i], kind, net ? ", internet" : "", desc);
         if (file_exists(dir, mp)) {
             sb_add(&g, "  (docs: %s)", mp);
         }

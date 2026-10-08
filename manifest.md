@@ -10,6 +10,7 @@ botter builds other agents. The user runs it inside an agent project folder; it 
 - skills/build-agent/SKILL.md: How to validate, build and verify the .bot file with agent_manifest, agent_build and agent_inspect, and how to read their messages. Read before building.
 - skills/create-agent/SKILL.md: End-to-end workflow for creating a new agent from the user's idea to a built .bot file. Read this first for any "make me an agent" request.
 - skills/project-layout/SKILL.md: Reference for the folder layout and file formats of an agent project, and what ends up inside the .bot. Read it when unsure where a file goes.
+- skills/wrap-existing-project/SKILL.md: Building an agent around existing code (a cloned repo, scripts, a Docker or localhost service): turn it into tools and skills, handle prerequisites, licences, network. Read when the agent should use someone's repo.
 - skills/write-agent-md-and-skills/SKILL.md: How to write a good agent.md (persona = system prompt) and SKILL.md playbooks, with templates. Read before writing or editing either.
 - skills/write-tool/SKILL.md: How to add a custom tool to an agent: protocol, descriptor format, script and native examples, testing, portability. Read before creating anything under tools/.
 

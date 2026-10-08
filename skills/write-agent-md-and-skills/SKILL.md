@@ -30,7 +30,7 @@ Working with files and tools
 
 Guidance
 - One role. If the user describes two jobs, make two agents or make one a skill.
-- State what the agent cannot do: it is offline and keeps no memory between runs. Do not let it promise otherwise.
+- State what the agent cannot do: it keeps no memory between runs, and it is offline unless it has a "network" tool (then name that tool as its only way to the internet). Do not let it promise otherwise.
 - Never put secrets in agent.md. It is embedded in the binary in readable form.
 - Do not copy this template blindly; fill it with the user's real requirements and delete empty sections.
 

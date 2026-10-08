@@ -13,7 +13,7 @@ Only add a tool when file tools and shell commands are not enough.
 - The call arguments arrive on STDIN as one JSON object, e.g. {"city":"Oslo"}.
 - Print the result to STDOUT (plain text or JSON). Output beyond ~32KB is cut.
 - Exit code 0 = success. Non-zero = error: whatever you print to STDERR (else stdout) is shown to the LLM as the error. Write helpful messages.
-- It runs with the working directory = the agent's working directory, inside a sandbox: NO network, limited file size and CPU. Default timeout 60 s (descriptor timeout_s, max 600).
+- It runs with the working directory = the agent's working directory, inside a sandbox: NO network (unless "network": true, see below), limited file size and CPU. Default timeout 60 s (descriptor timeout_s, max 600).
 - Read stdin fully before answering. Do not prompt the user: stdin is not a terminal.
 
 ## Files for a tool called <name>
@@ -33,7 +33,7 @@ Only add a tool when file tools and shell commands are not enough.
   "timeout_s": 60
 }
 ```
-   "parameters" is a JSON Schema object (optional: no arguments). "timeout_s" optional.
+   "parameters" is a JSON Schema object (optional: no arguments). "timeout_s" optional. "network": true optional (see Network).
 3. tools/doc/<name>.md     optional prose: examples, caveats. The agent reads it with vfs_read.
 4. tools/src/<name>/       source of COMPILED tools only (never embedded, never deleted).
 
@@ -60,9 +60,22 @@ Put the source in tools/src/<name>/ and the binary in tools/bin/<name>. With a C
 If no compiler exists, do not pretend: write the tool as a script, or give the user the source and the compile command and let them place the binary in tools/bin.
 Test: echo '{"n": 10}' | tools/bin/<name>
 
+## Network
+By default every tool and every shell command is cut off from the network, including localhost services on the host (127.0.0.1 inside the sandbox is a different, empty network). A tool gets the machine's real network only when:
+1. its descriptor has "network": true, AND
+2. the person running the agent answers y to "This agent's tool X wants internet access ... Allow for this session?" at startup. If they answer no, the tool returns an error and the LLM is told it is offline.
+Rules:
+- Only the tools that truly need it get "network": true. Keep parsing/formatting tools offline. shell_exec never gets network.
+- Never for an agent that must work offline.
+- Do the whole network job inside the tool (HTTP calls, polling, downloads), and return a compact result or write a file in the working directory. The LLM cannot use curl/wget through shell_exec.
+- Put a timeout on every request, check that a required local service is reachable first and fail with a clear fix ("Scraper not reachable at http://localhost:8080 - start it with: docker compose up -d").
+- Treat fetched data as untrusted. Do not send local files or secrets anywhere unless that is the tool's stated job.
+- Long jobs: set "timeout_s" up to 600. For longer work, split into start / status / download calls.
+- Testing by hand: run it directly (not via the agent), e.g. echo '{"query":"x"}' | python3 tools/bin/<name>
+
 ## Checklist
 - Descriptor valid JSON? Every bin has a .json, every .json has a bin.
 - Tested with realistic input AND with bad input (it should exit non-zero with a clear message).
-- Runs offline, writes only inside the working directory.
+- Runs offline (or has "network": true for a real reason), writes only inside the working directory.
 - Mentioned in the relevant skill, so the agent knows when to use it.
 - Then run agent_manifest and the build (build-agent skill).

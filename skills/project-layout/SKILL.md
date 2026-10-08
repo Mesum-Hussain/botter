@@ -14,10 +14,10 @@ The project root is the folder the user started botter in. The built file is nam
   skills/<name>/SKILL.md   task playbooks: how and when to use tools
   tools/                OPTIONAL
     bin/<name>          the runnable tool: native x86-64 ELF, or a script starting with #!
-    doc/<name>.json     REQUIRED for every bin: descriptor (description, parameters, timeout_s)
+    doc/<name>.json     REQUIRED for every bin: descriptor (description, parameters, timeout_s, network)
     doc/<name>.md       optional prose docs: examples, caveats, read via vfs_read
     src/<name>/         source of COMPILED tools. Never embedded, never deleted.
-  artifacts/            build-time inputs (not embedded)
+  artifacts/            build-time inputs (not embedded), e.g. a cloned repo you wrap into tools
 ```
 
 ## What is embedded in the .bot (read-only)
@@ -39,5 +39,6 @@ fs_list, fs_read, fs_write (files in the working directory), shell_exec (sandbox
 
 ## Runtime facts the agent author should know
 - The agent connects to an OpenAI-compatible LLM endpoint chosen by the user at every start (provider, API key, model). Nothing is saved to disk: no config, no logs, no memory between runs.
-- The agent is offline except for the LLM connection. Its tools and shell cannot reach the network.
+- The agent is offline except for the LLM connection. Its shell and tools cannot reach the network (not even localhost services), except tools whose descriptor has "network": true, and only after the user allows it at startup.
+- For a completely offline agent, the user can also pick "Ollama (local)" as provider, so not even the LLM call leaves the machine.
 - It is free inside its working directory and asks the user before touching anything outside it or doing something destructive.

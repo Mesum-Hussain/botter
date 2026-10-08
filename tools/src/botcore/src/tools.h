@@ -31,8 +31,8 @@ extern const size_t TOOLS_CRON_N;
 extern const tool_t TOOLS_VFS[]; /* registered only when an agent pack is linked */
 extern const size_t TOOLS_VFS_N;
 
-/* Child-side sandbox (after fork, before exec). 0 ok, -1 refuse to run. */
-int    tool_sandbox_apply(int cpu_s);
+/* Child-side sandbox (after fork, before exec). net = keep host network. 0 ok, -1 refuse to run. */
+int    tool_sandbox_apply(int cpu_s, int net);
 double tool_now_s(void);
 
 /* External tools = executables embedded in the agent pack (tool_ext.c). */
@@ -41,8 +41,12 @@ void   ext_init(void);                           /* scan the VFS, print warnings
 const ext_tool_t *ext_find(const char *name);
 void   ext_schema_append(cJSON *arr);
 bool   ext_run(const ext_tool_t *t, const cJSON *input, char *result, size_t result_len);
+/* Tools whose descriptor says "network": true -> count; names comma-joined into `names`. */
+size_t ext_network_tools(char *names, size_t cap);
+void   ext_allow_network(int allow); /* user's per-session answer (default: denied) */
 
-/* Startup probe: 1 if shell_exec children run in an empty network namespace. */
+/* Startup probe: how shell_exec / tool children are cut off from the network. */
+enum { NET_ISOLATION_NONE = 0, NET_ISOLATION_NETNS = 1, NET_ISOLATION_SECCOMP = 2 };
 int    tool_shell_probe(void);
 
 /* RAM-only scheduler (cron.c). Entries live for the session only. */

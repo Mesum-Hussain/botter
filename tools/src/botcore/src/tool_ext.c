@@ -46,11 +46,13 @@ struct ext_tool {
     char              *description;
     cJSON             *parameters;
     int                timeout_s;
+    int                network; /* descriptor "network": true: runs outside the empty netns if allowed */
     const vfs_entry_t *exe;
 };
 
 static ext_tool_t *g_ext;
 static size_t      g_ext_n;
+static int         g_net_allowed; /* user granted internet to "network" tools this session */
 
 static int valid_name(const char *s)
 {
@@ -108,6 +110,7 @@ void ext_init(void)
         const cJSON *desc = cJSON_GetObjectItemCaseSensitive(j, "description");
         const cJSON *par = cJSON_GetObjectItemCaseSensitive(j, "parameters");
         const cJSON *to = cJSON_GetObjectItemCaseSensitive(j, "timeout_s");
+        const cJSON *net = cJSON_GetObjectItemCaseSensitive(j, "network");
         if (!cJSON_IsObject(j) || !cJSON_IsString(desc) || !desc->valuestring[0]) {
             warn(name, "descriptor must be a JSON object with a non-empty \"description\"");
             cJSON_Delete(j);
@@ -132,6 +135,7 @@ void ext_init(void)
         if (cJSON_IsNumber(to) && to->valuedouble >= 1) {
             e->timeout_s = to->valuedouble > EXT_MAX_TIMEOUT_S ? EXT_MAX_TIMEOUT_S : (int)to->valuedouble;
         }
+        e->network = cJSON_IsTrue(net);
         e->exe = &t[i];
         cJSON_Delete(j);
     }
@@ -159,6 +163,29 @@ void ext_schema_append(cJSON *arr)
         cJSON_AddItemToObject(e, "function", fn);
         cJSON_AddItemToArray(arr, e);
     }
+}
+
+size_t ext_network_tools(char *names, size_t cap)
+{
+    size_t n = 0, len = 0;
+    if (cap) {
+        names[0] = '\0';
+    }
+    for (size_t i = 0; i < g_ext_n; i++) {
+        if (g_ext[i].network) {
+            int w = snprintf(names + len, cap > len ? cap - len : 0, "%s%s", n ? ", " : "", g_ext[i].name);
+            if (w > 0 && len + (size_t)w < cap) {
+                len += (size_t)w;
+            }
+            n++;
+        }
+    }
+    return n;
+}
+
+void ext_allow_network(int allow)
+{
+    g_net_allowed = allow;
 }
 
 /* Is a command with this name/path runnable? ("env" style lookups use PATH.) */
@@ -248,6 +275,11 @@ bool ext_run(const ext_tool_t *t, const cJSON *in, char *result, size_t rl)
         snprintf(result, rl, "%s", why);
         return false;
     }
+    if (t->network && !g_net_allowed) {
+        snprintf(result, rl, "this tool needs internet access, which the user did not allow for this session. "
+                             "Tell the user; it cannot be used until the agent is restarted and access is allowed.");
+        return false;
+    }
     char *args = cJSON_PrintUnformatted(in);
     if (!args) {
         snprintf(result, rl, "out of memory");
@@ -299,7 +331,7 @@ bool ext_run(const ext_tool_t *t, const cJSON *in, char *result, size_t rl)
         dup2(perr[1], 2);
         signal(SIGPIPE, SIG_DFL);
         signal(SIGINT, SIG_DFL);
-        if (chdir(guard_ctx()) != 0 || tool_sandbox_apply(timeout + 5) != 0) {
+        if (chdir(guard_ctx()) != 0 || tool_sandbox_apply(timeout + 5, t->network && g_net_allowed) != 0) {
             _exit(126);
         }
         /* Hand the tool a read-only handle to this agent's own executable as fd 3
