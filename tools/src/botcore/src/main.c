@@ -49,31 +49,48 @@ static const char *agent_prompt(void)
            "tables and heavy formatting; keep answers concise.";
 }
 
+/* agent.json: the agent's metadata (name, version, description, author, license, homepage) and
+ * settings (offline, builder). Parsed once; NULL if absent. *bad = present but not valid JSON. */
+static cJSON *agent_meta(int *bad)
+{
+    static cJSON *meta;
+    static int    loaded, invalid;
+    if (!loaded) {
+        loaded = 1;
+        const vfs_entry_t *e = vfs_find("agent.json");
+        if (e && e->kind == VFS_DATA) {
+            meta = cJSON_Parse(e->data);
+            invalid = !cJSON_IsObject(meta);
+        }
+    }
+    if (bad) {
+        *bad = invalid;
+    }
+    return cJSON_IsObject(meta) ? meta : NULL;
+}
+
+static const char *meta_str(const char *key)
+{
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(agent_meta(NULL), key);
+    return cJSON_IsString(v) && *v->valuestring ? v->valuestring : NULL;
+}
+
 /* agent.json {"builder": true}: an agent that builds agents (Botter) gets sqnc_review. */
 static int agent_builder(void)
 {
-    const vfs_entry_t *e = vfs_find("agent.json");
-    cJSON *j = e && e->kind == VFS_DATA ? cJSON_Parse(e->data) : NULL;
-    int b = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j, "builder"));
-    cJSON_Delete(j);
-    return b;
+    return cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(agent_meta(NULL), "builder"));
 }
 
 /* agent.json {"offline": true} makes the agent offline; anything else (or no file) = online. */
 static int agent_offline(void)
 {
-    const vfs_entry_t *e = vfs_find("agent.json");
-    if (!e || e->kind != VFS_DATA) {
-        return 0;
-    }
-    cJSON *j = cJSON_Parse(e->data);
-    int off = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j, "offline"));
-    if (!j) {
+    int bad = 0;
+    cJSON *m = agent_meta(&bad);
+    if (bad) {
         fprintf(stderr, ANSI_BOLD_RED "Error:" ANSI_RESET " agent.json is not valid JSON; running OFFLINE to be safe\n");
-        off = 1;
+        return 1;
     }
-    cJSON_Delete(j);
-    return off;
+    return cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(m, "offline"));
 }
 
 /* `description:` from a SKILL.md frontmatter block, copied into out (one line). */
@@ -808,6 +825,9 @@ int main(int argc, char **argv)
     chat_t chat;
 
     if (argc > 1 && (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0)) {
+        if (vfs_init() == 0 && meta_str("name")) { /* an agent: its own name and version first */
+            printf("%s %s\n", meta_str("name"), meta_str("version") ? meta_str("version") : "(no version)");
+        }
         printf("botcore %s (TLS: BearSSL; https://github.com/Mesum-Hussain/botter)\n", BC_VERSION);
         return 0;
     }
@@ -824,6 +844,14 @@ int main(int argc, char **argv)
     front_init();
     ext_init();
 
+    if (!front_active() && meta_str("name")) { /* plain REPL: say which agent this is */
+        printf(ANSI_BOLD_BLUE "%s" ANSI_RESET "%s%s", meta_str("name"), meta_str("version") ? " " : "",
+               meta_str("version") ? meta_str("version") : "");
+        if (meta_str("description")) {
+            printf(ANSI_DIM " · %s" ANSI_RESET, meta_str("description"));
+        }
+        puts("\n");
+    }
     int saved = connect_saved(&chat);
     if (saved < 0 || (saved == 0 && !connect_flow(&chat))) {
         return 0;
@@ -897,14 +925,24 @@ int main(int argc, char **argv)
         "message and your reply to it. Do not put such numbers in your own replies.";
     const char *front_hint = front_active() ? FRONT_HINT : "";
     char *index = vfs_count() ? pack_index() : NULL;
-    size_t sl = strlen(persona) + strlen(cwd) + sizeof(FIXED) + strlen(net_text) + sizeof(VFS_HINT) +
+    /* who the agent is, from agent.json (so it can answer "which version are you?") */
+    char ident[800] = "";
+    if (meta_str("name")) {
+        const char *d = meta_str("description"), *v = meta_str("version"), *a = meta_str("author");
+        size_t dl = d ? strlen(d) : 0;
+        int dot = d && dl && !strchr(".!?", d[dl - 1]); /* end the description with a full stop once */
+        snprintf(ident, sizeof(ident), "\nYou are the agent \"%.64s\"%s%.40s.%s%.300s%s%s%.100s%s", meta_str("name"),
+                 v ? ", version " : "", v ? v : "", d ? " " : "", d ? d : "", dot ? "." : "", a ? " Made by " : "",
+                 a ? a : "", a ? "." : "");
+    }
+    size_t sl = strlen(persona) + strlen(ident) + strlen(cwd) + sizeof(FIXED) + strlen(net_text) + sizeof(VFS_HINT) +
                 sizeof(FLOW_HINT) + sizeof(FRONT_HINT) + sizeof(MODE_HINT) + (index ? strlen(index) : 0) + 64;
     char *sys = malloc(sl);
     if (!sys) {
         fprintf(stderr, ANSI_BOLD_RED "Error:" ANSI_RESET " out of memory\n");
         return 1;
     }
-    snprintf(sys, sl, "%s\n\nWorking directory: %s\n%s %s%s%s%s%s%s%s", persona, cwd, FIXED, net_text,
+    snprintf(sys, sl, "%s%s\n\nWorking directory: %s\n%s %s%s%s%s%s%s%s", persona, ident, cwd, FIXED, net_text,
              vfs_count() ? "\n" : "", vfs_count() ? VFS_HINT : "", index ? index : "", has_flow ? FLOW_HINT : "",
              MODE_HINT, front_hint);
     free(index);

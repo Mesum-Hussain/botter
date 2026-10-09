@@ -63,9 +63,7 @@ LOAD SKILL "build-agent"
            Test the tool `tool.name` by hand with shell_exec and realistic stdin JSON, and fix it if it fails.
        END RETRY
    END FOR
-4. IF `plan` says the agent must work offline THEN
-       EXECUTE tool `fs_write` with payload { "path": "agent.json", "content": "{\"offline\": true}" }
-   END IF
+4. Write agent.json as the project-layout skill says: name, version (0.1.0 for a new agent, bumped for a changed one), a one-sentence description, author or license only if the user gave them, and "offline": true only if `plan` says the agent must work offline.
 5. IF `plan` describes more than one step for the agent THEN
        INVOKE SKILL "write-flow" USING context `plan`
    END IF

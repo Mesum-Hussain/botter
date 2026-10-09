@@ -11,7 +11,7 @@ Follow these steps in order. Keep the conversation short.
    - what the agent is for and who talks to it
    - what it must do and what it must never do (limits, tone, language)
    - whether it needs tools beyond reading/writing files and running shell commands. Most agents do not.
-   - network: agents are ONLINE by default (shell and tools can use the internet). Do not ask. Only if the user explicitly wants an offline agent, write agent.json {"offline": true} (see write-tool, section Network).
+   - network: agents are ONLINE by default (shell and tools can use the internet). Do not ask. Only if the user explicitly wants an offline agent, add "offline": true to agent.json (see write-tool, section Network).
    - whether it should be built around existing code (a repo or scripts the user has). If yes, read skills/wrap-existing-project/SKILL.md.
    Propose defaults if the user is vague. Do not ask what you can decide.
 
@@ -34,8 +34,9 @@ Follow these steps in order. Keep the conversation short.
 - Every skill has a precise description line, because the agent decides what to read from it.
 - Do not invent tools that you did not create. Do not mention capabilities the agent does not have (memory between runs; internet in an offline agent).
 - No mocks, placeholders or hard-coded responses anywhere. If a real integration needs something you do not have (an API key, a running service), make the tool fail with a clear message saying what is missing.
-- Offline agent (only when asked): agent.json {"offline": true}; agent.md says it works offline. If a tool there has "network": true, agent.md names it and says the user is asked to allow it at startup.
+- Always write agent.json with name, version "0.1.0" and a one-sentence description (see project-layout, section agent.json).
+- Offline agent (only when asked): "offline": true in agent.json; agent.md says it works offline. If a tool there has "network": true, agent.md names it and says the user is asked to allow it at startup.
 - Test every tool by hand with realistic stdin JSON before building (see write-tool). A build only checks file formats, not that tools work.
 
 ## Iterating
-After the first build, the user usually wants changes. Edit the files, then dry_run and build again. The new build overwrites the old .bot of the same name.
+After the first build, the user usually wants changes. Edit the files, bump "version" in agent.json (PATCH for fixes, MINOR for new abilities, MAJOR for changed behaviour), then dry_run and build again. The new build overwrites the old .bot of the same name.

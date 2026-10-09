@@ -110,6 +110,30 @@ sq_bad "an unclosed \`\`\`sqnc block is rejected" 'RETURN "Read " + `files.lengt
 ```' 'RETURN "Read " + `files.length` + " files"' 'is never closed with ```'
 sq_bad "decisions written as prose are a warning" 'Skip it.' 'if it is empty, skip it' "SQNC.md:17: warning: write 'if' as a Sqnc statement"
 
+# agent.json: metadata checked by the build, shown by list, --version, the start-up line and the system prompt
+mkagent "$T/meta" '{"name": "meta-agent", "version": "1.2.3", "description": "Tests metadata.", "author": "QA", "license": "MIT"}'
+build "$T/meta" "$T/meta.bot"
+check_not "agent.json: valid metadata builds without agent.json warnings" "$T/build.log" "agent.json"
+"$PACK" list "$T/meta.bot" >"$T/list.log" 2>&1
+check "agent.json: list shows name, version and description" "$T/list.log" "^version +1\\.2\\.3"
+"$T/meta.bot" --version >"$T/ver.log" 2>&1
+check "agent.json: --version prints the agent's name and version" "$T/ver.log" "^meta-agent 1\\.2\\.3"
+# meta_bad NAME JSON PATTERN: building with this agent.json must report PATTERN
+meta_bad() {
+    mkagent "$T/meta_bad" "$2"
+    rm -f "$T/meta_bad.bot"
+    "$PACK" build "$T/meta_bad" "$CORE" "$T/meta_bad.bot" >"$T/build.log" 2>&1
+    check "agent.json: $1" "$T/build.log" "$3"
+}
+meta_bad "a version that is not semver is an error" '{"name": "a", "version": "1.0"}' 'version "1\.0" is not a semantic version'
+if [ -e "$T/meta_bad.bot" ]; then fail "agent.json: an invalid agent.json is not built"; else pass "agent.json: an invalid agent.json is not built"; fi
+meta_bad "a bad name is an error" '{"name": "My Agent", "version": "1.0.0"}' 'name "My Agent" must be'
+meta_bad "invalid JSON is an error" '{"name": "a", "version": }' 'not a valid JSON object'
+meta_bad "a wrong type is an error" '{"name": "a", "version": "1.0.0", "offline": "yes"}' '"offline" must be true or false'
+meta_bad "an unknown key is a warning" '{"name": "a", "version": "1.0.0", "colour": "red"}' 'warning: agent.json: unknown key "colour"'
+meta_bad "missing name and version are warnings" '{"offline": false}' 'warning: agent.json has no "name"'
+if grep -q "\"version\": \"$(cat "$ROOT/VERSION")\"" "$ROOT/agent.json"; then pass "agent.json: Botter's version matches VERSION"; else fail "agent.json: Botter's version matches VERSION"; fi
+
 # ---------------------------------------------------------------------------
 section "Runtime: network modes, sandbox, system prompt (stub LLM)"
 
@@ -223,6 +247,11 @@ stub_start --text /dev/null
     timeout 60 "$T/flow.bot" >"$T/out" 2>&1)
 check "SQNC.md present: the flow starts by itself" "$T/out" "Which folder\\?"
 check "SQNC.md present: system prompt explains the [Sqnc] steps" "$T/rec/system.txt" "session is driven by its SQNC.md flow"
+
+stub_start --text /dev/null
+drive "$T/meta.bot" "$T/ws"
+check "agent.json: the agent shows its name and version at start" "$T/out" "meta-agent.*1\\.2\\.3.*Tests metadata"
+check "agent.json: the model knows its name and version" "$T/rec/system.txt" 'You are the agent "meta-agent", version 1\.2\.3\. Tests metadata\. Made by QA\.'
 
 # Sqnc interpreter: botcore runs the structure; only prose goes to the LLM
 mkagent "$T/sqagent"

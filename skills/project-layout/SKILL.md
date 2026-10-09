@@ -10,7 +10,7 @@ The project root is the folder the user started botter in. The built file is nam
 ```
 <agent>/
   agent.md             persona and behaviour = the agent's system prompt
-  agent.json           OPTIONAL settings. Only use: {"offline": true} for an offline agent
+  agent.json           the agent's metadata and settings (always write it; see "agent.json" below)
   SQNC.md              OPTIONAL (recommended for multi-step agents): the session flow in Sqnc: frontmatter + UPPERCASE statements, checked by the build, run by botcore at start-up (see write-flow)
   skills/<name>/SKILL.md   task playbooks: how and when to use tools
   tools/                OPTIONAL
@@ -44,3 +44,21 @@ fs_list, fs_read, fs_write (files in the working directory), shell_exec (sandbox
 - With agent.json {"offline": true} it is offline except for the LLM connection: its shell and tools cannot reach the network (not even localhost services), except tools whose descriptor has "network": true, and only after the user allows it at startup.
 - For a completely offline agent, the user can also pick "Ollama (local)" as provider, so not even the LLM call leaves the machine.
 - It is free inside its working directory and asks the user before touching anything outside it or doing something destructive. The kernel enforces this for shell commands and tools (Landlock): writes only in the working directory, /tmp and package caches; the rest of $HOME is hidden unless the user approves a command that names the path.
+
+## agent.json
+Every agent has one. The build checks it (bad JSON, wrong types, a bad name or version are errors), the agent prints its name and version at start-up and with --version, and agent_inspect shows it.
+
+{
+  "name": "lead-outreach",
+  "version": "0.1.0",
+  "description": "Finds local businesses that need the user's service and pitches each one, with approval.",
+  "author": "Jane Doe",
+  "license": "MIT",
+  "homepage": "https://github.com/jane/lead-outreach"
+}
+
+- name: lowercase letters, digits, - _ . (1-64); use the project folder's name.
+- version: semantic versioning MAJOR.MINOR.PATCH. A new agent starts at "0.1.0". When you change an existing agent, bump it before building: PATCH for fixes, MINOR for new abilities, MAJOR when it behaves differently for its users. Keep the other fields.
+- description: one sentence, what the agent does and for whom.
+- author, license, homepage: only what the user tells you (do not invent them); leave them out otherwise.
+- Settings: "offline": true only when the user asks for an offline agent (see write-tool, section Network). "builder": true is only for agents that build agents (Botter).

@@ -39,7 +39,24 @@ An agent is a folder of plain-text files. Botter writes them with you, and you c
 | `SQNC.md` | The session, step by step, in **Sqnc** | Anyone (structured English) |
 | `skills/<name>/SKILL.md` | Playbooks: how to do one task well | Anyone (English) |
 | `tools/bin/<name>` + `tools/doc/<name>.json` | Small programs the agent can run, and their description | A little code |
-| `agent.json` | Settings, e.g. `{"offline": true}` | Optional |
+| `agent.json` | Name, version, description, author, license, homepage, and settings such as `"offline": true` | Botter (you can edit it) |
+
+### agent.json: what the agent is
+
+Like `package.json` for an agent:
+
+```json
+{
+  "name": "lead-outreach",
+  "version": "1.2.0",
+  "description": "Finds local businesses that need your service and pitches each one, with your approval.",
+  "author": "Jane Doe",
+  "license": "MIT",
+  "homepage": "https://github.com/jane/lead-outreach"
+}
+```
+
+The build checks it: the version must be semantic (`MAJOR.MINOR.PATCH`), the name must be a valid identifier, and bad JSON or wrong types are errors. The agent shows its name and version when it starts and with `--version`, `botter_pack list` shows the metadata, and the agent itself knows its name and version if asked. Botter starts a new agent at `0.1.0` and bumps the version whenever it changes one. Settings live in the same file: `"offline": true` cuts the agent's tools off from the network.
 
 ### Skills: how to do a task
 

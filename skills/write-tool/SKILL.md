@@ -66,8 +66,8 @@ Test: echo '{"n": 10}' | tools/bin/<name>
 ## Network
 Agents are ONLINE by default: shell_exec and every tool reach the internet and localhost services. Nothing to declare.
 
-An agent is OFFLINE only when the user explicitly asks for it. Then create agent.json in the project root:
-  {"offline": true}
+An agent is OFFLINE only when the user explicitly asks for it. Then add this to its agent.json (keep the other fields):
+  "offline": true
 In an offline agent, shell_exec and every tool are cut off from the network by the kernel (including localhost; 127.0.0.1 is an empty, separate network) and network commands (curl, git clone, pip, docker, ...) are refused. The LLM connection is made by the runtime itself and always works. Exceptions, if the user wants them: a tool whose descriptor has "network": true gets the network, but only after the person running the agent answers y to "This agent's tool X wants internet access ... Allow for this session?" at startup. Give that flag only to the tools that truly need it.
 
 Rules for any tool that uses the network:

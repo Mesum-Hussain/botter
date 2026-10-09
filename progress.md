@@ -12,7 +12,7 @@ Legend: [D]=owner decided, [R]=recommendation (unapproved), [S]=spike needed, P0
 agent.md      persona -> system prompt (SQNC.md is run by botcore, not followed by the LLM)
 (no manifest.md [D 2026-10-09]: botcore lists skills (SKILL.md frontmatter description) + tools/doc/*.md in the system prompt at startup; tool schemas from tools/doc/*.json; packer warns on a leftover manifest.md and does not embed it)
 SQNC.md       OPTIONAL session flow in Sqnc (see §3b)
-agent.json    OPTIONAL {"offline": true}; absent = online
+agent.json    metadata + settings [D owner 2026-10-09]: name ([a-z0-9][a-z0-9._-]{0,63}), version (semver), description, author, license, homepage; offline, builder. Packer check_agent_json: bad JSON/types/name/version = errors, unknown key + missing name/version = warnings; list prints metadata; botcore: `<agent> --version` = "name version" + botcore line, REPL start line "name version · description", system prompt "You are the agent ..."; Botter always writes it (0.1.0, bump on change); Botter's own version must equal VERSION (test)
 skills/<n>/SKILL.md   playbooks (frontmatter name/description)
 tools/bin/<name>      ELF x86-64 or #! script;  tools/doc/<name>.json REQUIRED {description, parameters, timeout_s<=600, network}
 tools/doc/<name>.md   optional;  tools/src/ compiled-tool source, never embedded/deleted
@@ -26,7 +26,7 @@ Embedded: agent.md agent.json SQNC.md skills/** tools/doc/** tools/bin/* (flat).
 - Tool protocol: args = one JSON object on stdin (argv empty); stdout result; exit!=0 = error (stderr). Run from memfd+fexecve in sandbox child (setsid, cwd=ctx, rlimits, killpg on timeout/Ctrl-C, 32KB cap). fd 3 = agent's own exe (BOTCORE_RUNTIME_FD) so agent_build can use it as runtime.
 ### 3a. Network mode [D 2026-10-09]
 - ONLINE by default (botter + built agents): shell_exec/tools keep host network, network cmds allowed, `git push` asks, no consent prompt/probe.
-- `agent.json {"offline": true}` (invalid JSON => offline): children in empty netns (userns) else seccomp (blocks AF_INET/INET6/PACKET); guard denies curl/wget/pip/docker/git clone...; per-tool `"network": true` exception after startup y/N consent. Botter writes agent.json ONLY on explicit user request.
+- `agent.json {"offline": true}` (invalid JSON => offline): children in empty netns (userns) else seccomp (blocks AF_INET/INET6/PACKET); guard denies curl/wget/pip/docker/git clone...; per-tool `"network": true` exception after startup y/N consent. Botter adds "offline" to agent.json ONLY on explicit user request.
 - LLM calls are made by the botcore parent: never sandboxed, always work.
 ### 3b. SQNC.md / Sqnc [D owner 2026-10-09; was OML v2 / flow.md]
 - Name: Sqnc ("sequence") [D owner]; file SQNC.md [D owner] (packer accepts FLOW.md/flow.md with a rename warning, embeds as SQNC.md). "OML" dropped: clashes with Orchestra Markup Language (.oml, Oct 2026). Syntax from a Gemini-suggested example; research found no existing use (PDL YAML, POML, BWML XML, SudoLang, gh-aw prose).

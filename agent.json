@@ -1,1 +1,9 @@
-{"builder": true}
+{
+  "name": "botter",
+  "version": "0.1.0",
+  "description": "The agent that builds agents: describe one in plain English and Botter designs, writes, checks and builds it into a single Linux executable.",
+  "author": "Mesum Hussain",
+  "license": "MIT",
+  "homepage": "https://github.com/Mesum-Hussain/botter",
+  "builder": true
+}

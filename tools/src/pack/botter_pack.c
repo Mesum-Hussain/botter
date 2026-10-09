@@ -8,7 +8,8 @@
  * Embeds (read-only) from <agent-dir>:
  *   agent.md, agent.json, SQNC.md, skills/, tools/doc/ (recursive)   plain files
  *       (SQNC.md is optional: the session flow in Sqnc, checked by botcore/src/sqnc.c; errors stop the build)
- *       (agent.json is optional: {"offline": true} makes the agent offline; default online)
+ *       (agent.json: the agent's metadata and settings, validated by check_agent_json:
+ *        name, version (semver), description, author, license, homepage, offline, builder)
  *   tools/bin/<name>                                 tool executables: either a
  *       native ELF x86-64 binary (any language that compiles to one) or a script
  *       starting with "#!" (interpreter must exist on the machine running the agent).
@@ -33,6 +34,8 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#include "cJSON.h"
 
 #define BLOB_MAGIC       "BOTBLOB1"
 #define FOOTER_MAGIC     "BOTPACK1"
@@ -358,6 +361,126 @@ static int sqnc_has_skill(const char *name)
     return has_item(p);
 }
 
+/* "1.2.3", optionally "-pre.1" and/or "+build" (semver 2.0). */
+static int semver_ok(const char *v)
+{
+    for (int part = 0; part < 3; part++) {
+        if (!isdigit((unsigned char)*v) || (v[0] == '0' && isdigit((unsigned char)v[1]))) {
+            return 0;
+        }
+        while (isdigit((unsigned char)*v)) {
+            v++;
+        }
+        if (part < 2 && *v++ != '.') {
+            return 0;
+        }
+    }
+    if (*v == '-' || *v == '+') {
+        v++;
+        if (!*v) {
+            return 0;
+        }
+        for (; *v; v++) {
+            if (!isalnum((unsigned char)*v) && *v != '.' && *v != '-' && *v != '+') {
+                return 0;
+            }
+        }
+    }
+    return *v == '\0';
+}
+
+static int agent_name_ok(const char *n)
+{
+    size_t l = strlen(n);
+    if (l == 0 || l > 64 || !(islower((unsigned char)n[0]) || isdigit((unsigned char)n[0]))) {
+        return 0;
+    }
+    for (size_t i = 0; i < l; i++) {
+        if (!islower((unsigned char)n[i]) && !isdigit((unsigned char)n[i]) && !strchr("-_.", n[i])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/*
+ * agent.json: the agent's metadata and settings.
+ *   {"name": "lead-outreach", "version": "1.0.0", "description": "...", "author": "...",
+ *    "license": "MIT", "homepage": "https://...", "offline": false, "builder": false}
+ * name and version are expected (warning if missing); wrong types, bad JSON, a bad
+ * name or a non-semver version are errors.
+ */
+static void check_agent_json(void)
+{
+    const item_t *it = NULL;
+    for (size_t i = 0; i < n_items; i++) {
+        if (strcmp(items[i].path, "agent.json") == 0) {
+            it = &items[i];
+        }
+    }
+    if (!it || !it->data) {
+        warn("no agent.json: add one with the agent's %s (see the project-layout skill)", "name and version");
+        return;
+    }
+    cJSON *j = cJSON_ParseWithLength(it->data, it->len);
+    if (!cJSON_IsObject(j)) {
+        err("agent.json is not a valid JSON object%s%s", j ? "" : " (syntax error)", NULL);
+        cJSON_Delete(j);
+        return;
+    }
+    static const char *const strs[] = {"name", "version", "description", "author", "license", "homepage", NULL};
+    static const char *const bools[] = {"offline", "builder", NULL};
+    for (const cJSON *f = j->child; f; f = f->next) {
+        int known = 0;
+        for (int k = 0; strs[k]; k++) {
+            if (!strcmp(f->string, strs[k])) {
+                known = 1;
+                if (!cJSON_IsString(f)) {
+                    err("agent.json: \"%s\" must be a string%s", f->string, NULL);
+                }
+            }
+        }
+        for (int k = 0; bools[k]; k++) {
+            if (!strcmp(f->string, bools[k])) {
+                known = 1;
+                if (!cJSON_IsBool(f)) {
+                    err("agent.json: \"%s\" must be true or false%s", f->string, NULL);
+                }
+            }
+        }
+        if (!known) {
+            char m[200];
+            snprintf(m, sizeof(m), "agent.json: unknown key \"%.60s\" (known: name, version, description, author, "
+                     "license, homepage, offline, builder)", f->string);
+            warn("%s", m);
+        }
+    }
+    const cJSON *n = cJSON_GetObjectItemCaseSensitive(j, "name");
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(j, "version");
+    const cJSON *h = cJSON_GetObjectItemCaseSensitive(j, "homepage");
+    const cJSON *d = cJSON_GetObjectItemCaseSensitive(j, "description");
+    if (!n) {
+        warn("agent.json has no \"name\" (%s)", "lowercase letters, digits, - _ .; usually the folder name");
+    } else if (cJSON_IsString(n) && !agent_name_ok(n->valuestring)) {
+        err("agent.json: name \"%s\" must be 1-64 lowercase letters, digits, - _ . (starting with a letter or digit)%s",
+            n->valuestring, NULL);
+    }
+    if (!v) {
+        warn("agent.json has no \"version\" (%s)", "semantic versioning, e.g. \"0.1.0\"");
+    } else if (cJSON_IsString(v) && !semver_ok(v->valuestring)) {
+        err("agent.json: version \"%s\" is not a semantic version like 1.0.0 (MAJOR.MINOR.PATCH)%s", v->valuestring,
+            NULL);
+    }
+    if (cJSON_IsString(h) && *h->valuestring && strncmp(h->valuestring, "https://", 8) != 0 &&
+        strncmp(h->valuestring, "http://", 7) != 0) {
+        err("agent.json: homepage \"%s\" must be an http(s):// URL%s", h->valuestring, NULL);
+    }
+    if (cJSON_IsString(d) && strlen(d->valuestring) > 300) {
+        warn("agent.json: %s", "keep the description to one or two sentences (300 characters)");
+    }
+    cJSON_Delete(j);
+}
+
 /* Load every item; classify tools/bin entries as ELF or script. */
 static void load_and_classify(void)
 {
@@ -473,6 +596,10 @@ static int cmd_build(const char *dir, const char *botcore, const char *out)
     }
     qsort(items, n_items, sizeof(*items), cmp_item);
     load_and_classify();
+    if (errors) {
+        return 1;
+    }
+    check_agent_json();
     if (errors) {
         return 1;
     }
@@ -629,6 +756,24 @@ static int cmd_list(const char *file)
     const unsigned char *b = d + boff;
     uint32_t             cnt = get32(b + 8);
     static const char   *kn[] = {"data", "elf", "script"};
+    for (uint32_t i = 0; i < cnt; i++) { /* the agent's metadata first */
+        const unsigned char *e = b + BLOB_HEADER_SIZE + (size_t)i * BLOB_ENTRY_SIZE;
+        if (strcmp((const char *)b + get32(e), "agent.json") != 0) {
+            continue;
+        }
+        cJSON *j = cJSON_ParseWithLength((const char *)b + get64(e + 8), (size_t)get64(e + 16));
+        static const char *const keys[] = {"name", "version", "description", "author", "license", "homepage"};
+        for (int k = 0; k < 6; k++) {
+            const cJSON *f = cJSON_GetObjectItemCaseSensitive(j, keys[k]);
+            if (cJSON_IsString(f) && *f->valuestring) {
+                printf("%-12s %s\n", keys[k], f->valuestring);
+            }
+        }
+        if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j, "offline"))) {
+            printf("%-12s %s\n", "network", "offline");
+        }
+        cJSON_Delete(j);
+    }
     printf("%s: %u entries, pack at offset %llu (%llu bytes)\n", file, cnt, (unsigned long long)boff,
            (unsigned long long)blen);
     for (uint32_t i = 0; i < cnt; i++) {
