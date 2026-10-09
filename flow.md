@@ -13,7 +13,7 @@ if the request is a question about botter or agents:
 use fs_list on the working directory
 if agent.md or skills already exist:
     set mode = "edit"
-    read agent.md, manifest.md, flow.md and the skills that are there
+    read agent.md, agent.json, flow.md and the skills that are there
 else:
     set mode = "new"
 
@@ -45,7 +45,6 @@ if offline is true:
 if the agent has more than one step:
     follow the write-flow skill to write flow.md
 
-use the agent_manifest tool
 retry 5 times:
     use the agent_build tool with dry_run true
     fix every error and every flow.md warning it reports

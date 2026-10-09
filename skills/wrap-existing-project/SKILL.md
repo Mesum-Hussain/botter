@@ -40,4 +40,4 @@ artifacts/ is never embedded. You read it, then copy or adapt what the agent nee
 ## 6. Test before building
 - Start the service the way the user will, then run each tool by hand: echo '{...}' | python3 tools/bin/<name>
 - Test the failure path too (service stopped): the message must tell the user what to do.
-- Then agent_manifest, agent_build dry_run, agent_build, agent_inspect (build-agent skill). Tell the user what must be installed/running (and, for an offline agent with "network" tools, that it asks for internet permission at startup).
+- Then agent_build dry_run, agent_build, agent_inspect (build-agent skill). Tell the user what must be installed/running (and, for an offline agent with "network" tools, that it asks for internet permission at startup).

@@ -62,6 +62,77 @@ static int agent_offline(void)
     return off;
 }
 
+/* `description:` from a SKILL.md frontmatter block, copied into out (one line). */
+static void skill_desc(const vfs_entry_t *e, char *out, size_t cap)
+{
+    out[0] = '\0';
+    const char *s = e->data, *end = e->data + e->len;
+    if (e->len < 4 || strncmp(s, "---", 3) != 0) {
+        return;
+    }
+    for (const char *l = memchr(s, '\n', e->len); l && l + 1 < end; l = memchr(l + 1, '\n', (size_t)(end - l - 1))) {
+        const char *t = l + 1;
+        if (strncmp(t, "---", 3) == 0) {
+            return;
+        }
+        if (strncmp(t, "description:", 12) == 0) {
+            t += 12;
+            while (*t == ' ') {
+                t++;
+            }
+            size_t n = strcspn(t, "\r\n");
+            snprintf(out, cap, "%.*s", (int)(n < cap - 1 ? n : cap - 1), t);
+            return;
+        }
+    }
+}
+
+/*
+ * Index of this agent's embedded files for the system prompt, built from the
+ * pack itself (no manifest to go stale): skills with their frontmatter
+ * descriptions, prose tool docs, flow.md. Tools' own schemas reach the model
+ * separately. Caller frees.
+ */
+static char *pack_index(void)
+{
+    size_t n = 0, cap = 8192, len = 0;
+    const vfs_entry_t *t = vfs_table(&n);
+    char *s = malloc(cap);
+    if (!s) {
+        return NULL;
+    }
+    s[0] = '\0';
+#define ADD(...)                                                                \
+    do {                                                                        \
+        int w_ = snprintf(s + len, cap - len, __VA_ARGS__);                     \
+        if (w_ > 0 && len + (size_t)w_ < cap) {                                 \
+            len += (size_t)w_;                                                  \
+        }                                                                       \
+    } while (0)
+    int skills = 0, docs = 0;
+    for (size_t i = 0; i < n; i++) {
+        size_t pl = strlen(t[i].path);
+        if (t[i].kind == VFS_DATA && strncmp(t[i].path, "skills/", 7) == 0 && pl > 9 &&
+            strcmp(t[i].path + pl - 9, "/SKILL.md") == 0) {
+            char d[320];
+            skill_desc(&t[i], d, sizeof(d));
+            ADD("%s- %s: %s\n", skills++ ? "" : "\nYour skills (read one with vfs_read before the task it covers):\n",
+                t[i].path, d[0] ? d : "(no description)");
+        }
+    }
+    for (size_t i = 0; i < n; i++) {
+        size_t pl = strlen(t[i].path);
+        if (strncmp(t[i].path, "tools/doc/", 10) == 0 && pl > 13 && strcmp(t[i].path + pl - 3, ".md") == 0) {
+            ADD("%s%s%s", docs++ ? ", " : "\nTool documentation (vfs_read): ", t[i].path, "");
+        }
+    }
+    if (docs) {
+        ADD("\n");
+    }
+#undef ADD
+    return s;
+}
+
 static char *trim(char *s)
 {
     while (isspace((unsigned char)*s)) {
@@ -377,15 +448,15 @@ int main(void)
         "You are OFFLINE: the user did not allow internet access this session, so these tools will fail: %s. "
         "Rely on local files and your own knowledge, and tell the user if a task needs them.";
     static const char VFS_HINT[] =
-        "Your built-in reference files (manifest.md, skills/, tools/doc/) are read-only and available via "
-        "vfs_list and vfs_read. Read manifest.md first, and read the relevant skill or tool doc before "
-        "using a tool you are unsure about.";
+        "Your built-in reference files (skills/, tools/doc/, flow.md) are read-only and available via "
+        "vfs_list and vfs_read. Read the relevant skill or tool doc before using a tool you are unsure about.";
     static const char FLOW_HINT[] =
-        " Then read flow.md: it is the flow of this session written in OML (plain-English pseudo code: "
-        "set, if/elif/else, for, while, in parallel, retry N times, ask user, save state to, return). Follow "
-        "it step by step to decide when to use which skill and tool. Use only capabilities listed in "
-        "manifest.md; ask the user where the flow says so or when a step is ambiguous; keep loops and "
-        "retries bounded; if a step fails, stop safely and tell the user.";
+        "\nAt the start of the session, read flow.md: it is the flow of this session written in OML "
+        "(plain-English pseudo code: set, if/elif/else, for, while, in parallel, retry N times, ask user, "
+        "save state to, return). Follow it step by step to decide when to use which skill and tool. Use "
+        "only the skills and tools listed here and in your tool definitions (these are the manifest-declared "
+        "capabilities OML refers to); ask the user where the flow says so or when a step is ambiguous; keep "
+        "loops and retries bounded; if a step fails, stop safely and tell the user.";
     const vfs_entry_t *flow = vfs_find("flow.md");
     int has_flow = flow && flow->kind == VFS_DATA && flow->len > 0;
     char net_text[sizeof(ONLINE_ALL) + sizeof(ONLINE) + sizeof(DENIED) + sizeof(net_names)];
@@ -396,15 +467,17 @@ int main(void)
     }
     const char *persona = agent_prompt();
     const char *cwd = guard_ctx();
+    char *index = vfs_count() ? pack_index() : NULL;
     size_t sl = strlen(persona) + strlen(cwd) + sizeof(FIXED) + strlen(net_text) + sizeof(VFS_HINT) +
-                sizeof(FLOW_HINT) + 64;
+                sizeof(FLOW_HINT) + (index ? strlen(index) : 0) + 64;
     char *sys = malloc(sl);
     if (!sys) {
         fprintf(stderr, ANSI_BOLD_RED "Error:" ANSI_RESET " out of memory\n");
         return 1;
     }
-    snprintf(sys, sl, "%s\n\nWorking directory: %s\n%s %s%s%s%s", persona, cwd, FIXED, net_text,
-             vfs_count() ? "\n" : "", vfs_count() ? VFS_HINT : "", has_flow ? FLOW_HINT : "");
+    snprintf(sys, sl, "%s\n\nWorking directory: %s\n%s %s%s%s%s%s", persona, cwd, FIXED, net_text,
+             vfs_count() ? "\n" : "", vfs_count() ? VFS_HINT : "", index ? index : "", has_flow ? FLOW_HINT : "");
+    free(index);
     chat_set_system(&chat, sys);
     free(sys);
 

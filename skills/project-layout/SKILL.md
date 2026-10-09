@@ -9,7 +9,6 @@ The project root is the folder the user started botter in. The built file is nam
 
 ```
 <agent>/
-  manifest.md          map of the project for the LLM (generated block + free text)
   agent.md             persona and behaviour = the agent's system prompt
   agent.json           OPTIONAL settings. Only use: {"offline": true} for an offline agent
   flow.md              OPTIONAL (recommended for multi-step agents): the session flow in OML (see write-flow)
@@ -23,14 +22,14 @@ The project root is the folder the user started botter in. The built file is nam
 ```
 
 ## What is embedded in the .bot (read-only)
-manifest.md, agent.md, agent.json, flow.md, skills/** , tools/doc/** , tools/bin/* (flat, no sub-folders)
+agent.md, agent.json, flow.md, skills/** , tools/doc/** , tools/bin/* (flat, no sub-folders)
 
 ## What is NOT embedded
 tools/src, artifacts, hidden files (names starting with a dot), symlinks, everything else (README, .git, notes, test data).
 
 ## Rules
 - agent.md is the system prompt. If missing, the agent runs with a generic default prompt (build warns).
-- The agent reads manifest.md first at run time, then flow.md (if present) to know the order of steps, then the skills it needs, through the vfs_list and vfs_read tools. So the manifest and skill descriptions must be accurate and short.
+- There is no manifest: at start-up the runtime lists the skills (path + frontmatter description) and tool docs in the system prompt; tool schemas come from tools/doc/*.json. The agent then reads flow.md (if present) for the order of steps and the skills it needs, with vfs_read. So skill and tool descriptions must be accurate and short.
 - Interpreted tools need no tools/src: the script in tools/bin is the source.
 - Tool name = file name in tools/bin = [A-Za-z0-9_-]{1,64}. It must not clash with a built-in tool.
 - Skill folder names: lowercase letters, digits and dashes, e.g. summarize-logs.

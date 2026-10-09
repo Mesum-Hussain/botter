@@ -5,7 +5,7 @@ description: How to write flow.md, the agent's session flow in OML (plain-Englis
 
 # flow.md: the session flow in OML
 
-flow.md tells the agent WHEN to use which skill and tool, step by step, for a whole session. manifest.md says WHAT exists; skills say HOW to do one task; flow.md is the order and the decisions between them. It is a small stand-in for LangGraph / n8n graphs: no engine runs it, the agent's LLM reads and follows it, and botcore's guards (approvals, sandbox, timeouts) still apply.
+flow.md tells the agent WHEN to use which skill and tool, step by step, for a whole session. The runtime's list of skills and tools says WHAT exists; skills say HOW to do one task; flow.md is the order and the decisions between them. It is a small stand-in for LangGraph / n8n graphs: no engine runs it, the agent's LLM reads and follows it, and botcore's guards (approvals, sandbox, timeouts) still apply.
 
 Every agent with more than one step gets a flow.md in the project root. A one-shot agent (answers a question, done) does not need one.
 
@@ -31,8 +31,8 @@ Every agent with more than one step gets a flow.md in the project root. A one-sh
 - Anything else is an action in plain English. Name the skill or tool it uses: `use the scrape_leads tool with the target and city`, `follow the pitching skill`.
 
 ## Rules
-- Only use capabilities in manifest.md: built-in tools, this agent's tools, its skills. Never invent a tool.
-- Name tools and skills exactly as in manifest.md.
+- Only use the agent's declared capabilities ("manifest-declared" in the header): built-in tools, the agent's tools/doc/*.json tools, its skills. Never invent a tool.
+- Name tools and skills exactly as they are named in the project (tool file names, skill paths).
 - Keep each line one clear step. If a step needs a paragraph, it belongs in a skill; the flow names the skill.
 - Every loop and retry is bounded. Every failure path ends in `ask user` or `return` with a clear message.
 - Approvals: put `ask user` before anything irreversible or outward-facing.

@@ -82,4 +82,4 @@ Rules for any tool that uses the network:
 - Tested with realistic input AND with bad input (it should exit non-zero with a clear message). Real output, no mocks.
 - Writes only inside the working directory. In an offline agent: "network": true only for a real reason.
 - Mentioned in the relevant skill, so the agent knows when to use it.
-- Then run agent_manifest and the build (build-agent skill).
+- Then build (build-agent skill).

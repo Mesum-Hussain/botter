@@ -133,12 +133,22 @@ else
     check "Landlock: /tmp stays writable" "$T/rec/tool.txt" "TMP-OK"
 fi
 
+mkagent "$T/skilled"
+mkdir -p "$T/skilled/skills/pitching"
+printf -- '---\nname: pitching\ndescription: Write one specific idea per lead. Read before pitching.\n---\n# Pitching\n' >"$T/skilled/skills/pitching/SKILL.md"
+echo "# stale" >"$T/skilled/manifest.md"
+build "$T/skilled" "$T/skilled.bot"
+check "leftover manifest.md is reported and not embedded" "$T/build.log" "manifest.md is no longer used"
+stub_start --text /dev/null
+drive "$T/skilled.bot" "$T/ws"
+check "system prompt lists skills with their frontmatter descriptions" "$T/rec/system.txt" "skills/pitching/SKILL.md: Write one specific idea per lead"
+
 mkagent "$T/flowagent"
 cp "$T/flow_good/flow.md" "$T/flowagent/"
 build "$T/flowagent" "$T/flow.bot"
 stub_start --text /dev/null
 drive "$T/flow.bot" "$T/ws"
-check "flow.md present: system prompt tells the agent to follow it" "$T/rec/system.txt" "Then read flow.md"
+check "flow.md present: system prompt tells the agent to follow it" "$T/rec/system.txt" "read flow.md: it is the flow of this session"
 
 shell_call "echo no-curl-needed"
 drive "$T/on.bot" "$T/ws" PATH=/nonexistent

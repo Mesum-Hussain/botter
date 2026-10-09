@@ -254,7 +254,7 @@ static bool vfs_read_tool(const cJSON *in, char *result, size_t rl)
 
 const tool_t TOOLS_VFS[] = {
     {"vfs_list",
-     "List the agent's built-in read-only files (manifest, skills, tool docs). Optional 'prefix' filters "
+     "List the agent's built-in read-only files (skills, tool docs, flow.md). Optional 'prefix' filters "
      "by path prefix, e.g. 'skills/'.",
      "{\"type\":\"object\",\"properties\":{\"prefix\":{\"type\":\"string\"}}}",
      vfs_list_tool},

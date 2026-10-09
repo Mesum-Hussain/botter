@@ -1,16 +1,15 @@
 ---
 name: build-agent
-description: How to validate, build and verify the .bot file with agent_manifest, agent_build and agent_inspect, and how to read their messages. Read before building.
+description: How to validate, build and verify the .bot file with agent_build and agent_inspect, and how to read their messages. Read before building.
 ---
 
 # Building
 
 Steps
-1. agent_manifest {}              refresh manifest.md (skills and tools list). Do this whenever skills/tools changed.
-2. agent_build {"dry_run": true}  validate only. Fix every "error" line, then repeat until it says "check passed".
-3. agent_build {}                 build ./<project folder name>.bot in the working directory (or pass "output").
-4. agent_inspect {"file": "<name>.bot"}   list the embedded files and tools; confirm everything expected is there.
-5. Tell the user to run it: ./<name>.bot
+1. agent_build {"dry_run": true}  validate only. Fix every "error" line, then repeat until it says "check passed".
+2. agent_build {}                 build ./<project folder name>.bot in the working directory (or pass "output").
+3. agent_inspect {"file": "<name>.bot"}   list the embedded files and tools; confirm everything expected is there.
+4. Tell the user to run it: ./<name>.bot
 
 Arguments: "dir" is the project folder relative to the working directory (default ".", the working directory itself). All paths must stay inside the working directory.
 
@@ -32,7 +31,7 @@ What the build does: copies the botcore runtime (the same engine botter runs on)
 ## Warnings (build still succeeds)
 - "dynamically linked": that tool only runs where its shared libraries exist. Relink statically for a portable agent.
 - "no agent.md": the agent will use a generic prompt. Write agent.md.
-- "no manifest.md": run agent_manifest.
+- "manifest.md is no longer used": delete it; the runtime lists skills and tools itself.
 - "descriptor without matching executable": a tools/doc/X.json exists but tools/bin/X does not; that tool will not exist.
 
 ## After building

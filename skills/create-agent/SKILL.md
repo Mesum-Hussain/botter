@@ -23,9 +23,7 @@ Follow these steps in order. Keep the conversation short.
 
 5. Only if the agent really needs capabilities that shell commands and file tools cannot give (a special parser, a calculation, a local program, network access), add tools. Read skills/write-tool/SKILL.md. Prefer a script tool over a compiled one unless the user wants a native binary. The agent's own LLM does the thinking (analysing, writing, deciding, replying); tools only do I/O and computation. Do not write a tool that calls an LLM or orchestrates the whole job in a script: put the workflow in a skill and let the agent run it step by step.
 
-6. Call agent_manifest to generate manifest.md.
-
-6b. If the agent has more than one step, write flow.md: the session flow in OML, naming the skills and tools from manifest.md (read skills/write-flow/SKILL.md). Then run agent_manifest again so manifest.md lists flow.md.
+6. If the agent has more than one step, write flow.md: the session flow in OML, naming the agent's skills and tools exactly (read skills/write-flow/SKILL.md).
 
 7. Build: read skills/build-agent/SKILL.md. Run agent_build with dry_run=true, fix all errors, then agent_build, then agent_inspect.
 
@@ -36,8 +34,8 @@ Follow these steps in order. Keep the conversation short.
 - Every skill has a precise description line, because the agent decides what to read from it.
 - Do not invent tools that you did not create. Do not mention capabilities the agent does not have (memory between runs; internet in an offline agent).
 - No mocks, placeholders or hard-coded responses anywhere. If a real integration needs something you do not have (an API key, a running service), make the tool fail with a clear message saying what is missing.
-- Offline agent (only when asked): agent.json {"offline": true}; agent.md says it works offline; manifest.md shows "Network: OFFLINE". If a tool there has "network": true, agent.md names it and says the user is asked to allow it at startup.
+- Offline agent (only when asked): agent.json {"offline": true}; agent.md says it works offline. If a tool there has "network": true, agent.md names it and says the user is asked to allow it at startup.
 - Test every tool by hand with realistic stdin JSON before building (see write-tool). A build only checks file formats, not that tools work.
 
 ## Iterating
-After the first build, the user usually wants changes. Edit the files, rerun agent_manifest if skills or tools changed, then dry_run and build again. The new build overwrites the old .bot of the same name.
+After the first build, the user usually wants changes. Edit the files, then dry_run and build again. The new build overwrites the old .bot of the same name.

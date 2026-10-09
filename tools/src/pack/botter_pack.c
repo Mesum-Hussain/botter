@@ -6,7 +6,7 @@
  *   botter_pack list  <file.bot>
  *
  * Embeds (read-only) from <agent-dir>:
- *   manifest.md, agent.md, agent.json, flow.md, skills/, tools/doc/ (recursive)   plain files
+ *   agent.md, agent.json, flow.md, skills/, tools/doc/ (recursive)   plain files
  *       (flow.md is optional: the session flow in OML, linted for structure, see oml_lint)
  *       (agent.json is optional: {"offline": true} makes the agent offline; default online)
  *   tools/bin/<name>                                 tool executables: either a
@@ -568,7 +568,6 @@ static int cmd_build(const char *dir, const char *botcore, const char *out)
              botcore);
     }
 
-    add_root_file(dir, "manifest.md");
     add_root_file(dir, "agent.md");
     add_root_file(dir, "agent.json");
     add_root_file(dir, "flow.md");
@@ -586,9 +585,11 @@ static int cmd_build(const char *dir, const char *botcore, const char *out)
     if (!has_item("agent.md")) {
         warn("no agent.md (%s: default system prompt will be used)", "agent");
     }
-    if (!has_item("manifest.md")) {
-        warn("no manifest.md (%s)", "the agent has no map of its files");
+    char *mf = join(dir, "manifest.md");
+    if (access(mf, F_OK) == 0) {
+        warn("%s is no longer used (botcore lists skills and tools itself); it is not embedded, delete it", mf);
     }
+    free(mf);
     for (size_t i = 0; i < n_items; i++) {
         if (strcmp(items[i].path, "flow.md") == 0 && items[i].data) {
             oml_lint(items[i].data, items[i].len);

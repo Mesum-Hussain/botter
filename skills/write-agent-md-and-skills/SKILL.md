@@ -24,8 +24,8 @@ Rules
 - <what to do when you do not know: say so, do not guess>
 
 Working with files and tools
-- At the start of a session, read manifest.md with vfs_read to learn every tool and skill you have.
-- Then read flow.md and follow it: it says when to use which skill and tool. (Omit this line if the agent has no flow.md.)
+- Your skills and tools are listed in your system prompt and tool definitions.
+- At the start of a session, read flow.md and follow it: it says when to use which skill and tool. (Omit this line if the agent has no flow.md.)
 - Before doing a task a skill covers, read that skill with vfs_read.
 - <which tools to prefer for which job, if the agent has custom tools>
 ```
@@ -38,7 +38,7 @@ Guidance
 
 # Writing a skill
 
-A skill is a playbook for one recurring task. File: skills/<name>/SKILL.md. The agent sees only the one-line description in manifest.md and opens the skill when the task matches, so the description must say WHEN to use it.
+A skill is a playbook for one recurring task. File: skills/<name>/SKILL.md. The agent sees only the one-line `description:` from the frontmatter (the runtime lists it in the system prompt) and opens the skill when the task matches, so the description must say WHEN to use it.
 
 Template:
 
@@ -64,4 +64,4 @@ Guidance
 - Name the tools exactly as they appear (fs_read, shell_exec, or the custom tool name) and say what to pass.
 - Keep each skill under about 60 lines. Split if longer.
 - A skill may refer to other embedded files, e.g. tools/doc/<name>.md.
-- After creating or renaming skills, run agent_manifest so manifest.md lists them.
+- Every SKILL.md starts with frontmatter (--- name: ... description: ... ---): without a description the agent cannot tell when to read it.
