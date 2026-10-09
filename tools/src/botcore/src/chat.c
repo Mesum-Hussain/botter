@@ -244,6 +244,59 @@ void chat_set_tools(chat_t *c, cJSON *tools, char *(*cb)(void *, const char *, c
     c->tool_ud = ud;
 }
 
+void chat_set_events(chat_t *c, void (*cb)(void *, int, const char *), void *ud)
+{
+    c->ev_cb = cb;
+    c->ev_ud = ud;
+    c->thoughts = cb && strstr(c->base, "generativelanguage.googleapis.com") != NULL;
+}
+
+/*
+ * Reasoning: a "reasoning_content"/"reasoning" field, or leading <think>,
+ * <thinking>, <thought> blocks in the text (removed from `text` in place).
+ */
+static void report_thoughts(chat_t *c, const cJSON *msg, char *text)
+{
+    if (!c->ev_cb) {
+        return;
+    }
+    const char *fields[] = {"reasoning_content", "reasoning"};
+    for (size_t i = 0; i < 2; i++) {
+        const cJSON *r = cJSON_GetObjectItemCaseSensitive(msg, fields[i]);
+        if (cJSON_IsString(r) && *r->valuestring) {
+            c->ev_cb(c->ev_ud, CHAT_EV_THINKING, r->valuestring);
+            break;
+        }
+    }
+    static const char *const tags[] = {"think", "thinking", "thought"};
+    for (int found = 1; text && found;) {
+        found = 0;
+        char *p = text;
+        while (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t') {
+            p++;
+        }
+        for (size_t i = 0; i < 3 && !found; i++) {
+            char open[16], close[20];
+            snprintf(open, sizeof(open), "<%s>", tags[i]);
+            snprintf(close, sizeof(close), "</%s>", tags[i]);
+            if (strncmp(p, open, strlen(open)) != 0) {
+                continue;
+            }
+            char *body = p + strlen(open);
+            char *end = strstr(body, close);
+            char *rest = end ? end + strlen(close) : body + strlen(body);
+            if (end) {
+                *end = '\0';
+            }
+            if (*body) {
+                c->ev_cb(c->ev_ud, CHAT_EV_THINKING, body);
+            }
+            memmove(text, rest, strlen(rest) + 1);
+            found = 1;
+        }
+    }
+}
+
 /* Append a tool-role result message. */
 static void add_tool_result(cJSON *arr, const char *id, const char *name, const char *content)
 {
@@ -315,8 +368,13 @@ int chat_send(chat_t *c, const char *user, char **reply, char **err)
         if (c->tools && cJSON_GetArraySize(c->tools) > 0) {
             cJSON_AddItemReferenceToObject(root, "tools", c->tools);
         }
+        if (c->thoughts) {
+            cJSON *eb = cJSON_AddObjectToObject(root, "extra_body");
+            cJSON *tc = cJSON_AddObjectToObject(cJSON_AddObjectToObject(eb, "google"), "thinking_config");
+            cJSON_AddTrueToObject(tc, "include_thoughts");
+        }
         char *body = cJSON_PrintUnformatted(root);
-        cJSON_Delete(root); /* only drops the references */
+        cJSON_Delete(root); /* only drops the references (and extra_body) */
         if (!body) {
             *err = strdup("out of memory");
             goto fail;
@@ -328,6 +386,12 @@ int chat_send(chat_t *c, const char *user, char **reply, char **err)
             ret = transport_error(rc, &r, err);
             http_resp_free(&r);
             goto fail;
+        }
+        if (r.status == 400 && c->thoughts) {
+            c->thoughts = 0; /* endpoint refused extra_body: retry without it */
+            http_resp_free(&r);
+            round--;
+            continue;
         }
         if (r.status < 200 || r.status >= 300) {
             *err = error_text(r.status, r.body);
@@ -349,8 +413,13 @@ int chat_send(chat_t *c, const char *user, char **reply, char **err)
             cJSON *content = cJSON_GetObjectItemCaseSensitive(msg, "content");
             cJSON_AddStringToObject(am, "role", "assistant");
             if (cJSON_IsString(content)) {
+                report_thoughts(c, msg, content->valuestring);
+                if (c->ev_cb && content->valuestring[strspn(content->valuestring, " \n\r\t")]) {
+                    c->ev_cb(c->ev_ud, CHAT_EV_TEXT, content->valuestring);
+                }
                 cJSON_AddStringToObject(am, "content", content->valuestring);
             } else {
+                report_thoughts(c, msg, NULL);
                 cJSON_AddNullToObject(am, "content");
             }
             cJSON_AddItemToObject(am, "tool_calls", cJSON_Duplicate(calls, 1));
@@ -370,6 +439,7 @@ int chat_send(chat_t *c, const char *user, char **reply, char **err)
         if (!text && cJSON_IsObject(msg)) {
             text = strdup(""); /* null content, no tool calls: an empty answer */
         }
+        report_thoughts(c, msg, text);
         cJSON_Delete(j);
         if (!text) {
             *err = strdup("unexpected response format (no message content)");

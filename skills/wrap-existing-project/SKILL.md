@@ -5,7 +5,7 @@ description: Building an agent around existing code (a cloned repo, scripts, a D
 
 # Wrapping an existing project
 
-You are offline, so the user must put the code on disk first, inside the project:
+Put the code on disk inside the project first (clone it yourself, or ask the user for a local copy):
   git clone <url> artifacts/<repo-name>
 artifacts/ is never embedded. You read it, then copy or adapt what the agent needs into tools/ and skills/.
 
@@ -18,11 +18,13 @@ artifacts/ is never embedded. You read it, then copy or adapt what the agent nee
 - One tool = one file in tools/bin. It must follow the protocol (JSON object on stdin, result on stdout, exit 0 / non-zero). Existing CLIs usually take argv, so write a small adapter, or adapt the script itself into a single self-contained file (stdlib only: the agent cannot pip install).
 - Prefer a few task-shaped tools (e.g. scrape_start, scrape_status, scrape_download) over one tool with dozens of flags. Expose only the parameters the agent needs; keep sane defaults from the repo.
 - Big results: write them to a file in the working directory (CSV/JSON) and return a short summary plus the path and a few preview rows. Tool output is cut at ~32KB.
-- Any step that talks to a server, even on localhost, needs "network": true in that tool's descriptor (read write-tool, section Network). Pure post-processing (cleaning a CSV, filtering, scoring) stays in offline tools or is done by the agent with fs_read.
+- Wrap the repo's real entry point with its real required arguments (read its usage line). No mock fallbacks.
+- Understanding, ranking and writing (e.g. reading a lead and inventing a pitch) is the agent's own LLM's job, guided by a skill. Do not hide it in a script.
+- Only if the agent is offline (agent.json) does a step that talks to a server, even on localhost, need "network": true in that tool's descriptor (read write-tool, section Network).
 - Runs longer than 10 minutes: split into start / status / download, and let the agent poll (or use cron_set to check back).
 
 ## 3. Services the code depends on (Docker containers, local servers)
-- The agent cannot start them: shell_exec blocks docker and has no network. The user starts them.
+- Prefer that the user starts them (docker compose up -d). An online agent may run docker itself through shell_exec if the user agrees; an offline agent cannot.
 - Every networked tool first checks the service is reachable and, if not, fails with the exact fix, e.g. "Scraper not reachable at http://localhost:8080. Start it with: docker compose up -d (in a folder containing docker-compose.yml)".
 - If a config file is needed (docker-compose.yml), put its content in a skill or tools/doc/<tool>.md so the agent can write it into the working directory with fs_write and tell the user the command to run.
 
@@ -37,4 +39,4 @@ artifacts/ is never embedded. You read it, then copy or adapt what the agent nee
 ## 6. Test before building
 - Start the service the way the user will, then run each tool by hand: echo '{...}' | python3 tools/bin/<name>
 - Test the failure path too (service stopped): the message must tell the user what to do.
-- Then agent_manifest, agent_build dry_run, agent_build, agent_inspect (build-agent skill). Tell the user what must be installed/running and that the agent will ask for internet permission at startup.
+- Then agent_manifest, agent_build dry_run, agent_build, agent_inspect (build-agent skill). Tell the user what must be installed/running (and, for an offline agent with "network" tools, that it asks for internet permission at startup).

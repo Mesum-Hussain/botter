@@ -6,7 +6,9 @@
  *   botter_pack list  <file.bot>
  *
  * Embeds (read-only) from <agent-dir>:
- *   manifest.md, agent.md, skills/, tools/doc/ (recursive)   plain files
+ *   manifest.md, agent.md, agent.json, flow.md, skills/, tools/doc/ (recursive)   plain files
+ *       (flow.md is optional: the session flow in OML, linted for structure, see oml_lint)
+ *       (agent.json is optional: {"offline": true} makes the agent offline; default online)
  *   tools/bin/<name>                                 tool executables: either a
  *       native ELF x86-64 binary (any language that compiles to one) or a script
  *       starting with "#!" (interpreter must exist on the machine running the agent).
@@ -296,6 +298,159 @@ static int cmp_item(const void *a, const void *b)
     return strcmp(((const item_t *)a)->path, ((const item_t *)b)->path);
 }
 
+/*
+ * OML v1 structure check for flow.md (warnings only: conditions and actions are
+ * plain English, so only the shape is checked). Rules: the file starts with the
+ * <!-- OML v1 ... --> description; the OML code sits in a ```oml fenced block
+ * (so markdown keeps its indentation); 4-space indentation, no tabs; a line ending in
+ * ':' opens a block whose body is indented exactly 4 more; if/elif/else/for/while
+ * lines end in ':'; elif/else follow an unfinished if at the same depth;
+ * for-lines read "for <item> in <collection>:".
+ */
+#define OML_MAXD 64
+static void oml_warn(int line, const char *msg)
+{
+    char m[200];
+    snprintf(m, sizeof(m), "flow.md line %d: %s", line, msg);
+    warn("%s", m);
+}
+
+static void oml_lint_code(const char *s, size_t n, int line);
+
+static void oml_lint(const char *s, size_t n)
+{
+    size_t i = 0;
+    while (i < n && (s[i] == ' ' || s[i] == '\n' || s[i] == '\r' || s[i] == '\t')) {
+        i++;
+    }
+    if (n - i < 11 || strncmp(s + i, "<!-- OML v1", 11) != 0) {
+        warn("flow.md does not start with the %s description comment", "<!-- OML v1 ... -->");
+    }
+    /* find the ```oml fence; lint only its body */
+    int line = 0;
+    for (size_t p = 0; p < n;) {
+        size_t e = p;
+        while (e < n && s[e] != '\n') {
+            e++;
+        }
+        line++;
+        size_t q = p;
+        while (q < e && s[q] == ' ') {
+            q++;
+        }
+        if (e - q >= 6 && (strncmp(s + q, "```oml", 6) == 0 || strncmp(s + q, "```OML", 6) == 0)) {
+            size_t b = e < n ? e + 1 : n, c = b;
+            while (c < n) {
+                size_t ce = c;
+                while (ce < n && s[ce] != '\n') {
+                    ce++;
+                }
+                size_t cq = c;
+                while (cq < ce && s[cq] == ' ') {
+                    cq++;
+                }
+                if (ce - cq >= 3 && strncmp(s + cq, "```", 3) == 0) {
+                    break;
+                }
+                c = ce < n ? ce + 1 : n;
+            }
+            if (c >= n) {
+                warn("flow.md: the %s block is not closed with ```", "```oml");
+            }
+            oml_lint_code(s + b, c - b, line);
+            return;
+        }
+        p = e + 1;
+    }
+    warn("flow.md: put the OML code inside a %s fenced block, or markdown will mangle its indentation", "```oml");
+    oml_lint_code(s, n, 0);
+}
+
+/* `line` = file line number just before s (for messages). */
+static void oml_lint_code(const char *s, size_t n, int line)
+{
+    int open_if[OML_MAXD] = {0};
+    int in_comment = 0, want_body = -1, prev_indent = 0, opener_line = 0;
+    for (size_t p = 0; p < n;) {
+        size_t e = p;
+        while (e < n && s[e] != '\n') {
+            e++;
+        }
+        line++;
+        char buf[512];
+        size_t len = e - p < sizeof(buf) - 1 ? e - p : sizeof(buf) - 1;
+        memcpy(buf, s + p, len);
+        buf[len] = '\0';
+        p = e + 1;
+        while (len && (buf[len - 1] == '\r' || buf[len - 1] == ' ')) {
+            buf[--len] = '\0';
+        }
+        char *t = buf;
+        if (in_comment || strstr(t, "<!--")) {
+            in_comment = strstr(t, "-->") == NULL;
+            continue;
+        }
+        int ind = 0, tab = 0;
+        while (t[ind] == ' ' || t[ind] == '\t') {
+            tab |= t[ind] == '\t';
+            ind++;
+        }
+        t += ind;
+        if (!*t || (ind == 0 && *t == '#')) {
+            continue; /* blank line or markdown heading */
+        }
+        if (tab) {
+            oml_warn(line, "use spaces, not tabs, for indentation");
+            continue;
+        }
+        if (ind % 4) {
+            oml_warn(line, "indentation must be a multiple of 4 spaces");
+        }
+        int d = ind / 4 < OML_MAXD ? ind / 4 : OML_MAXD - 1;
+        if (want_body >= 0) {
+            if (ind != want_body) {
+                oml_warn(opener_line, "a line ending in ':' must be followed by a body indented 4 more spaces");
+            }
+            want_body = -1;
+        } else if (ind > prev_indent) {
+            oml_warn(line, "unexpected indent (only a line ending in ':' opens a block)");
+        }
+        for (int k = d + 1; k < OML_MAXD; k++) {
+            open_if[k] = 0;
+        }
+        char w[16] = {0};
+        size_t wl = strcspn(t, " :");
+        if (wl < sizeof(w)) {
+            memcpy(w, t, wl);
+        }
+        int colon = len && buf[len - 1] == ':';
+        if (!strcmp(w, "if") || !strcmp(w, "elif") || !strcmp(w, "else") || !strcmp(w, "for") || !strcmp(w, "while")) {
+            if (!colon) {
+                oml_warn(line, "if/elif/else/for/while lines must end with ':'");
+            }
+        }
+        if (!strcmp(w, "elif") || !strcmp(w, "else")) {
+            if (!open_if[d]) {
+                oml_warn(line, "elif/else without an unfinished 'if' at the same indentation");
+            }
+            open_if[d] = !strcmp(w, "elif");
+        } else {
+            open_if[d] = !strcmp(w, "if");
+        }
+        if (!strcmp(w, "for") && !strstr(t, " in ")) {
+            oml_warn(line, "a for-line reads: for <item> in <collection>:");
+        }
+        if (colon) {
+            want_body = ind + 4;
+            opener_line = line;
+        }
+        prev_indent = ind;
+    }
+    if (want_body >= 0) {
+        oml_warn(opener_line, "a line ending in ':' must be followed by a body indented 4 more spaces");
+    }
+}
+
 static int has_item(const char *path)
 {
     for (size_t i = 0; i < n_items; i++) {
@@ -402,6 +557,8 @@ static int cmd_build(const char *dir, const char *botcore, const char *out)
 
     add_root_file(dir, "manifest.md");
     add_root_file(dir, "agent.md");
+    add_root_file(dir, "agent.json");
+    add_root_file(dir, "flow.md");
     add_tree(dir, "skills", K_DATA, 0);
     add_tree(dir, "tools/doc", K_DATA, 0);
     add_tree(dir, "tools/bin", K_DATA, 1);
@@ -418,6 +575,11 @@ static int cmd_build(const char *dir, const char *botcore, const char *out)
     }
     if (!has_item("manifest.md")) {
         warn("no manifest.md (%s)", "the agent has no map of its files");
+    }
+    for (size_t i = 0; i < n_items; i++) {
+        if (strcmp(items[i].path, "flow.md") == 0 && items[i].data) {
+            oml_lint(items[i].data, items[i].len);
+        }
     }
 
     if (!out) { /* dry run: everything validated, write nothing */

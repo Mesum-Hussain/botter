@@ -178,7 +178,7 @@ int tool_shell_probe(void)
 /*
  * Child-side sandbox shared by shell_exec and external tools: no core dumps,
  * file size and CPU rlimits, no network (L5: empty netns, else seccomp) unless
- * `net` (a "network" tool the user allowed). Returns 0, or -1 if the isolation
+ * `net` (an online agent, or a "network" tool the user allowed in an offline one). Returns 0, or -1 if the isolation
  * the probe found could not be applied (fail closed).
  */
 int tool_sandbox_apply(int cpu_s, int net)
@@ -267,7 +267,7 @@ static bool shell_exec(const cJSON *in, char *result, size_t rl)
         if (chdir(guard_ctx()) != 0) {
             _exit(126);
         }
-        if (tool_sandbox_apply(timeout + 5, 0) != 0) {
+        if (tool_sandbox_apply(timeout + 5, !guard_offline()) != 0) {
             _exit(126);
         }
         char *argv[] = {"sh", "-c", (char *)cmd, NULL};
@@ -363,8 +363,7 @@ static bool shell_exec(const cJSON *in, char *result, size_t rl)
 const tool_t TOOLS_SHELL[] = {
     {"shell_exec",
      "Run a shell command (/bin/sh -c) in the working directory and return its combined stdout+stderr "
-     "and exit code. The environment is OFFLINE: network access is impossible and network tools (curl, "
-     "git clone/pull/push, pip, npm, ssh, ...) are blocked. Destructive commands (rm, overwrite, "
+     "and exit code. Whether it has network access is stated in the system prompt. Destructive commands (rm, overwrite, "
      "git reset --hard, sudo, ...) and anything touching paths outside the working directory ask the "
      "user for approval first. Output is capped (~32KB). Default timeout 30s.",
      "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"},"

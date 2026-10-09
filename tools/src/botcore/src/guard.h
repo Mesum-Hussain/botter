@@ -15,6 +15,15 @@ void        guard_init(void);   /* records the context dir; call once at startup
 const char *guard_ctx(void);
 
 /*
+ * Network mode of this agent. Online (the default) leaves shell_exec and tools
+ * on the host network; offline (agent.json {"offline": true}) blocks network
+ * commands here and cuts children off in the kernel (tool_sandbox_apply).
+ * The LLM connection itself is made by botcore and is never affected.
+ */
+void        guard_set_offline(int offline);
+int         guard_offline(void);
+
+/*
  * Resolve `path` (relative paths are relative to the context dir) to an
  * absolute, symlink-free path. The final components need not exist.
  * Returns 0 on success (*inside = 1 if within the context dir), -1 if the

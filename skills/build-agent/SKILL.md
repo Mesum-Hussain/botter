@@ -16,6 +16,11 @@ Arguments: "dir" is the project folder relative to the working directory (defaul
 
 What the build does: copies the botcore runtime (the same engine botter runs on) and appends the project files to it. No compiler or linker runs. The result is one static x86-64 executable. Rebuilding replaces the old .bot.
 
+## Warnings you may see
+- "flow.md: put the OML code inside a ```oml fenced block": wrap the logic in ```oml ... ``` (see write-flow).
+- "flow.md line N: ...": OML structure problem (indentation, a missing ':', elif/else without if, an empty block). Fix it; the agent follows a broken flow badly.
+- "flow.md does not start with the <!-- OML v1 ... --> description comment": copy the header from skills/write-flow/SKILL.md.
+
 ## Errors you may see
 - "tools/bin/X has no descriptor tools/doc/X.json": add the descriptor (see write-tool).
 - "tools/bin/X is neither an ELF executable nor a script starting with #!": the file is not a program. Add a #! line or put in a real binary.

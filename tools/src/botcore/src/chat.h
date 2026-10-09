@@ -13,7 +13,14 @@ typedef struct {
     cJSON *tools;   /* OpenAI "tools" array, or NULL */
     char *(*tool_cb)(void *ud, const char *name, const char *args_json); /* returns malloc'd result text */
     void  *tool_ud;
+    void (*ev_cb)(void *ud, int kind, const char *text); /* optional: CHAT_EV_* */
+    void  *ev_ud;
+    int    thoughts; /* ask Gemini for its thoughts (cleared if the endpoint refuses) */
 } chat_t;
+
+/* Events (only when an event callback is set; reasoning is then also kept out of the reply). */
+#define CHAT_EV_THINKING 1 /* model reasoning */
+#define CHAT_EV_TEXT     2 /* assistant text sent together with tool calls */
 
 /* Max model<->tool round trips inside one user turn. */
 #define CHAT_MAX_TOOL_ROUNDS 25
@@ -33,6 +40,9 @@ void chat_free(chat_t *c);
 
 /* Enable tool calling. Takes ownership of `tools`. cb runs each call and returns the result text. */
 void chat_set_tools(chat_t *c, cJSON *tools, char *(*cb)(void *, const char *, const char *), void *ud);
+
+/* Report reasoning / interim text through cb (see CHAT_EV_*). */
+void chat_set_events(chat_t *c, void (*cb)(void *, int, const char *), void *ud);
 
 /* Set (or, with NULL/"", clear) the system prompt. Never trimmed from history. */
 int  chat_set_system(chat_t *c, const char *text);

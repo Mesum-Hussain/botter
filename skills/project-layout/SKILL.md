@@ -11,6 +11,8 @@ The project root is the folder the user started botter in. The built file is nam
 <agent>/
   manifest.md          map of the project for the LLM (generated block + free text)
   agent.md             persona and behaviour = the agent's system prompt
+  agent.json           OPTIONAL settings. Only use: {"offline": true} for an offline agent
+  flow.md              OPTIONAL (recommended for multi-step agents): the session flow in OML (see write-flow)
   skills/<name>/SKILL.md   task playbooks: how and when to use tools
   tools/                OPTIONAL
     bin/<name>          the runnable tool: native x86-64 ELF, or a script starting with #!
@@ -21,24 +23,25 @@ The project root is the folder the user started botter in. The built file is nam
 ```
 
 ## What is embedded in the .bot (read-only)
-manifest.md, agent.md, skills/** , tools/doc/** , tools/bin/* (flat, no sub-folders)
+manifest.md, agent.md, agent.json, flow.md, skills/** , tools/doc/** , tools/bin/* (flat, no sub-folders)
 
 ## What is NOT embedded
 tools/src, artifacts, hidden files (names starting with a dot), symlinks, everything else (README, .git, notes, test data).
 
 ## Rules
 - agent.md is the system prompt. If missing, the agent runs with a generic default prompt (build warns).
-- The agent reads manifest.md first at run time, then the skills it needs, through the vfs_list and vfs_read tools. So the manifest and skill descriptions must be accurate and short.
+- The agent reads manifest.md first at run time, then flow.md (if present) to know the order of steps, then the skills it needs, through the vfs_list and vfs_read tools. So the manifest and skill descriptions must be accurate and short.
 - Interpreted tools need no tools/src: the script in tools/bin is the source.
 - Tool name = file name in tools/bin = [A-Za-z0-9_-]{1,64}. It must not clash with a built-in tool.
 - Skill folder names: lowercase letters, digits and dashes, e.g. summarize-logs.
 - Average users have no tools folder at all. That is fine: an agent with only agent.md and skills is a complete agent.
 
 ## Every agent also has these built-in tools (no work needed)
-fs_list, fs_read, fs_write (files in the working directory), shell_exec (sandboxed, offline), cron_set / cron_list / cron_delete (schedules that live only while the agent runs), get_time, and vfs_list / vfs_read (the embedded read-only files above, only present if a pack exists).
+fs_list, fs_read, fs_write (files in the working directory), shell_exec (sandboxed; online unless the agent is offline), cron_set / cron_list / cron_delete (schedules that live only while the agent runs), get_time, and vfs_list / vfs_read (the embedded read-only files above, only present if a pack exists).
 
 ## Runtime facts the agent author should know
 - The agent connects to an OpenAI-compatible LLM endpoint chosen by the user at every start (provider, API key, model). Nothing is saved to disk: no config, no logs, no memory between runs.
-- The agent is offline except for the LLM connection. Its shell and tools cannot reach the network (not even localhost services), except tools whose descriptor has "network": true, and only after the user allows it at startup.
+- The agent is online by default: its shell and tools can reach the internet and localhost services.
+- With agent.json {"offline": true} it is offline except for the LLM connection: its shell and tools cannot reach the network (not even localhost services), except tools whose descriptor has "network": true, and only after the user allows it at startup.
 - For a completely offline agent, the user can also pick "Ollama (local)" as provider, so not even the LLM call leaves the machine.
 - It is free inside its working directory and asks the user before touching anything outside it or doing something destructive.

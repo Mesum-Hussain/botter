@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "term.h"
 #include "http.h"
+#include "front.h"
 
 #include <errno.h>
 #include <poll.h>
@@ -436,6 +437,9 @@ int term_readline(const char *prompt, int secret, char **out)
     int tty = secret && isatty(STDIN_FILENO);
 
     *out = NULL;
+    if (front_active()) {
+        return front_readline(prompt, secret, g_idle, out);
+    }
     if (!secret && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)) {
         int er = edit_line(prompt, out);
         if (er != -2) {

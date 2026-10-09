@@ -296,6 +296,24 @@ static int cmd_manifest(const cJSON *args)
     /* files */
     sb_add(&g, "## Files\n");
     sb_add(&g, "- agent.md: persona and behaviour (system prompt)%s\n", file_exists(dir, "agent.md") ? "" : "  [MISSING]");
+    if (file_exists(dir, "flow.md")) {
+        sb_add(&g, "- flow.md: the session flow in OML (read it after this manifest; it says when to use which skill and tool)\n");
+    }
+    int offline = 0;
+    if (file_exists(dir, "agent.json")) {
+        char  *af = join(dir, "agent.json");
+        size_t an = 0;
+        char  *at = slurp(af, &an);
+        cJSON *aj = at ? cJSON_Parse(at) : NULL;
+        offline = !aj || cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(aj, "offline"));
+        sb_add(&g, "- agent.json: settings%s\n", aj ? "" : "  [INVALID JSON: the agent will run offline]");
+        cJSON_Delete(aj);
+        free(at);
+        free(af);
+    }
+    sb_add(&g, "\nNetwork: %s\n", offline ? "OFFLINE (shell and tools have no network, except tools tagged internet "
+                                                 "once the user allows it at startup; the LLM connection is unaffected)"
+                                               : "online (shell commands and tools can use the internet)");
 
     /* skills */
     sb_add(&g, "\n## Skills (read with vfs_read before the task they cover)\n");
@@ -357,7 +375,7 @@ static int cmd_manifest(const cJSON *args)
             desc = xstrdup("(no descriptor: this tool will NOT load)");
         }
         one_line(desc, 240);
-        sb_add(&g, "- %s [%s%s]: %s", bv[i], kind, net ? ", internet" : "", desc);
+        sb_add(&g, "- %s [%s%s]: %s", bv[i], kind, offline && net ? ", internet" : "", desc);
         if (file_exists(dir, mp)) {
             sb_add(&g, "  (docs: %s)", mp);
         }

@@ -1,8 +1,10 @@
 # Build the botter agent (this project is itself an agent project, see manifest.md).
 #
-#   make            -> ./botter     (static x86-64 executable: botcore + embedded pack)
+#   make            -> ./botter     (static x86-64 executable: the TUI front end with the agent
+#                                    artifacts/botter.bot = botcore + embedded pack, appended)
 #   make tools      -> tools/bin/*  (static musl executables from tools/src/agent_tools)
 #   make artifacts  -> artifacts/botcore (static runtime) + artifacts/botter_pack (packer)
+#   make tui        -> tui/botter-tui (botter-only full-screen UI; agents built by botter never get it)
 #   make clean
 #
 # Build-time only; none of this is embedded. Needs gcc and musl-gcc (Fedora: musl-gcc musl-libc-static).
@@ -13,10 +15,20 @@ TOOL_NAMES  = agent_manifest agent_build agent_inspect
 TOOL_BINS   = $(addprefix tools/bin/,$(TOOL_NAMES))
 CJSON       = $(BOTCORE_DIR)/lib/cjson
 
-AGENT_FILES = $(shell find manifest.md agent.md skills tools/doc -type f 2>/dev/null)
+AGENT_FILES = $(shell find manifest.md agent.md flow.md agent.json skills tools/doc -type f 2>/dev/null)
 
-botter: artifacts/botcore artifacts/botter_pack $(TOOL_BINS) $(AGENT_FILES)
+# The TUI runs the agent from a memfd, so the agent's own executable (which agent_build
+# uses as the runtime for new agents) is plain botcore + pack, without the TUI.
+botter: tui/botter-tui artifacts/botter.bot
+	tui/botter-tui --bundle artifacts/botter.bot $@
+
+artifacts/botter.bot: artifacts/botcore artifacts/botter_pack $(TOOL_BINS) $(AGENT_FILES)
 	artifacts/botter_pack build . artifacts/botcore $@
+
+tui: tui/botter-tui
+
+tui/botter-tui: $(wildcard tui/*.c tui/*.h) $(CJSON)/cJSON.c
+	$(MAKE) -C tui
 
 tools: $(TOOL_BINS)
 
@@ -46,6 +58,7 @@ $(TOOL_BINS): $(AGENT_TOOLS)
 
 clean:
 	rm -rf artifacts botter tools/bin $(AGENT_TOOLS)
+	$(MAKE) -C tui clean
 	$(MAKE) -C $(BOTCORE_DIR) clean
 
-.PHONY: tools artifacts clean
+.PHONY: tools artifacts tui clean

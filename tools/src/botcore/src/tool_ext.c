@@ -275,7 +275,7 @@ bool ext_run(const ext_tool_t *t, const cJSON *in, char *result, size_t rl)
         snprintf(result, rl, "%s", why);
         return false;
     }
-    if (t->network && !g_net_allowed) {
+    if (guard_offline() && t->network && !g_net_allowed) {
         snprintf(result, rl, "this tool needs internet access, which the user did not allow for this session. "
                              "Tell the user; it cannot be used until the agent is restarted and access is allowed.");
         return false;
@@ -331,7 +331,7 @@ bool ext_run(const ext_tool_t *t, const cJSON *in, char *result, size_t rl)
         dup2(perr[1], 2);
         signal(SIGPIPE, SIG_DFL);
         signal(SIGINT, SIG_DFL);
-        if (chdir(guard_ctx()) != 0 || tool_sandbox_apply(timeout + 5, t->network && g_net_allowed) != 0) {
+        if (chdir(guard_ctx()) != 0 || tool_sandbox_apply(timeout + 5, !guard_offline() || (t->network && g_net_allowed)) != 0) {
             _exit(126);
         }
         /* Hand the tool a read-only handle to this agent's own executable as fd 3

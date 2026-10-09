@@ -1,10 +1,13 @@
-# botter
+# Botter
 
 botter builds other agents. The user runs it inside an agent project folder; it designs the project with the user, writes agent.md / skills / optional tools, and compiles the folder into <folder name>.bot. Start with skills/create-agent/SKILL.md. Text outside the generated block below is hand-editable and is kept.
 
 <!-- botter:generated:begin (managed by the agent_manifest tool; edit outside these markers) -->
 ## Files
 - agent.md: persona and behaviour (system prompt)
+- flow.md: the session flow in OML (read it after this manifest; it says when to use which skill and tool)
+
+Network: online (shell commands and tools can use the internet)
 
 ## Skills (read with vfs_read before the task they cover)
 - skills/build-agent/SKILL.md: How to validate, build and verify the .bot file with agent_manifest, agent_build and agent_inspect, and how to read their messages. Read before building.
@@ -12,6 +15,7 @@ botter builds other agents. The user runs it inside an agent project folder; it 
 - skills/project-layout/SKILL.md: Reference for the folder layout and file formats of an agent project, and what ends up inside the .bot. Read it when unsure where a file goes.
 - skills/wrap-existing-project/SKILL.md: Building an agent around existing code (a cloned repo, scripts, a Docker or localhost service): turn it into tools and skills, handle prerequisites, licences, network. Read when the agent should use someone's repo.
 - skills/write-agent-md-and-skills/SKILL.md: How to write a good agent.md (persona = system prompt) and SKILL.md playbooks, with templates. Read before writing or editing either.
+- skills/write-flow/SKILL.md: How to write flow.md, the agent's session flow in OML (plain-English pseudo code), with the exact header to copy and examples. Read before writing or editing any flow.md.
 - skills/write-tool/SKILL.md: How to add a custom tool to an agent: protocol, descriptor format, script and native examples, testing, portability. Read before creating anything under tools/.
 
 ## Tools (callable; arguments are described in the tool schema)
@@ -24,5 +28,5 @@ botter builds other agents. The user runs it inside an agent project folder; it 
 Workflow: create-agent -> (write-agent-md-and-skills, write-tool) -> agent_manifest -> agent_build dry_run -> agent_build -> agent_inspect.
 - project-layout is the reference for where files go and what gets embedded.
 - agent_build, agent_manifest and agent_inspect only accept paths inside the working directory.
-- agent_build uses botter's own runtime as the base of the new agent, so it works offline and needs no compiler.
+- agent_build uses botter's own runtime as the base of the new agent, so it needs no internet and no compiler.
 - Sources of botter's own tools: tools/src/agent_tools (not embedded). Runtime: tools/src/botcore. Packer: tools/src/pack.

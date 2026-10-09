@@ -11,7 +11,7 @@ Follow these steps in order. Keep the conversation short.
    - what the agent is for and who talks to it
    - what it must do and what it must never do (limits, tone, language)
    - whether it needs tools beyond reading/writing files and running shell commands. Most agents do not.
-   - whether it needs the internet (live web data, an online API, a local service such as a Docker container on localhost). Default: NO. Only ask if the idea suggests it; an offline agent is the safe default and must not get any internet tool.
+   - network: agents are ONLINE by default (shell and tools can use the internet). Do not ask. Only if the user explicitly wants an offline agent, write agent.json {"offline": true} (see write-tool, section Network).
    - whether it should be built around existing code (a repo or scripts the user has). If yes, read skills/wrap-existing-project/SKILL.md.
    Propose defaults if the user is vague. Do not ask what you can decide.
 
@@ -21,21 +21,23 @@ Follow these steps in order. Keep the conversation short.
 
 4. Write one SKILL.md per recurring task the agent should do well (same skill file explains how). Skip skills for trivial agents.
 
-5. Only if the agent really needs capabilities that shell commands and file tools cannot give (a special parser, a calculation, a local program, network access), add tools. Read skills/write-tool/SKILL.md. Prefer a script tool over a compiled one unless the user wants a native binary. Network access is ONLY possible through a tool whose descriptor has "network": true (see write-tool, section Network).
+5. Only if the agent really needs capabilities that shell commands and file tools cannot give (a special parser, a calculation, a local program, network access), add tools. Read skills/write-tool/SKILL.md. Prefer a script tool over a compiled one unless the user wants a native binary. The agent's own LLM does the thinking (analysing, writing, deciding, replying); tools only do I/O and computation. Do not write a tool that calls an LLM or orchestrates the whole job in a script: put the workflow in a skill and let the agent run it step by step.
 
 6. Call agent_manifest to generate manifest.md.
 
+6b. If the agent has more than one step, write flow.md: the session flow in OML, naming the skills and tools from manifest.md (read skills/write-flow/SKILL.md). Then run agent_manifest again so manifest.md lists flow.md.
+
 7. Build: read skills/build-agent/SKILL.md. Run agent_build with dry_run=true, fix all errors, then agent_build, then agent_inspect.
 
-8. Tell the user: the file name, its size, how to run it (./<name>.bot), what it asks at startup (provider, API key, model, and the internet permission question if a tool has "network": true), what tools it contains, and what must be installed or running on the machine (interpreters, services). Mention any warnings from the build in plain words.
+8. Tell the user: the file name, its size, how to run it (./<name>.bot), what it asks at startup (provider, API key, model, and, for an offline agent with a "network" tool, the internet permission question), what tools it contains, and what must be installed or running on the machine (interpreters, services). Mention any warnings from the build in plain words.
 
 ## Quality bar
 - agent.md describes ONE clear role. A paragraph or two plus a few firm rules is better than a long essay.
 - Every skill has a precise description line, because the agent decides what to read from it.
-- Do not invent tools that you did not create. Do not mention capabilities the agent does not have (memory between runs; internet unless it has a "network" tool).
-- Offline agent: no tool has "network": true. Say in agent.md that it works offline. agent_inspect / manifest.md must show no tool marked internet.
-- Internet agent: agent.md says which tool reaches the internet and for what, and that the user is asked to allow it at startup. Keep every other tool offline.
-- Test script tools by hand before building (see write-tool).
+- Do not invent tools that you did not create. Do not mention capabilities the agent does not have (memory between runs; internet in an offline agent).
+- No mocks, placeholders or hard-coded responses anywhere. If a real integration needs something you do not have (an API key, a running service), make the tool fail with a clear message saying what is missing.
+- Offline agent (only when asked): agent.json {"offline": true}; agent.md says it works offline; manifest.md shows "Network: OFFLINE". If a tool there has "network": true, agent.md names it and says the user is asked to allow it at startup.
+- Test every tool by hand with realistic stdin JSON before building (see write-tool). A build only checks file formats, not that tools work.
 
 ## Iterating
 After the first build, the user usually wants changes. Edit the files, rerun agent_manifest if skills or tools changed, then dry_run and build again. The new build overwrites the old .bot of the same name.

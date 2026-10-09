@@ -5,3 +5,5 @@
 /tools/src/agent_tools/agent_tools
 /graphify-out/
 /pac.md
+tui/botter-tui
+tui/botter-tui-dev

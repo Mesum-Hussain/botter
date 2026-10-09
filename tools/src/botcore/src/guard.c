@@ -14,6 +14,18 @@
 static char g_ctx[PATH_MAX];
 static int  g_always[GUARD_NCAT];
 
+static int g_offline;
+
+void guard_set_offline(int offline)
+{
+    g_offline = offline;
+}
+
+int guard_offline(void)
+{
+    return g_offline;
+}
+
 void guard_init(void)
 {
     if (!getcwd(g_ctx, sizeof(g_ctx)) || !realpath(".", g_ctx)) {
@@ -457,7 +469,7 @@ int guard_shell_classify(const char *cmd, char *why, size_t why_len)
         }
         cmdpos = 0;
 
-        if (in_list(base, NET_CMDS)) {
+        if (g_offline && in_list(base, NET_CMDS)) {
             snprintf(why, why_len, "'%s' is blocked: the agent is offline-only (no network tools)", base);
             deny = 1;
             break;
@@ -469,7 +481,7 @@ int guard_shell_classify(const char *cmd, char *why, size_t why_len)
             }
             if (j < a1) {
                 const char *sub = ARG(j);
-                if (in_list(sub, GIT_NET)) {
+                if (g_offline && in_list(sub, GIT_NET)) {
                     snprintf(why, why_len, "'git %s' is blocked: the agent is offline-only", sub);
                     deny = 1;
                     break;
@@ -488,6 +500,9 @@ int guard_shell_classify(const char *cmd, char *why, size_t why_len)
                 }
                 if (bad) {
                     add_why(&r, "destructive git operation: git %s", sub);
+                }
+                if (strcmp(sub, "push") == 0) {
+                    add_why(&r, "publishes to a remote repository (git push)");
                 }
             }
         } else if (in_list(base, DESTRUCT) || strncmp(base, "mkfs", 4) == 0) {

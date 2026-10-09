@@ -24,13 +24,15 @@ Rules
 - <what to do when you do not know: say so, do not guess>
 
 Working with files and tools
-- Your skills are listed in manifest.md. Before doing a task a skill covers, read that skill with vfs_read.
+- At the start of a session, read manifest.md with vfs_read to learn every tool and skill you have.
+- Then read flow.md and follow it: it says when to use which skill and tool. (Omit this line if the agent has no flow.md.)
+- Before doing a task a skill covers, read that skill with vfs_read.
 - <which tools to prefer for which job, if the agent has custom tools>
 ```
 
 Guidance
 - One role. If the user describes two jobs, make two agents or make one a skill.
-- State what the agent cannot do: it keeps no memory between runs, and it is offline unless it has a "network" tool (then name that tool as its only way to the internet). Do not let it promise otherwise.
+- State what the agent cannot do: it keeps no memory between runs (unless it saves files in its working directory), and, for an offline agent only, it has no internet (or only through its "network" tools, named). Do not let it promise otherwise.
 - Never put secrets in agent.md. It is embedded in the binary in readable form.
 - Do not copy this template blindly; fill it with the user's real requirements and delete empty sections.
 
