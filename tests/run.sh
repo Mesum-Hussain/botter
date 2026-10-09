@@ -69,45 +69,46 @@ mkagent() {
 build() { "$PACK" build "$1" "$CORE" "$2" >"$T/build.log" 2>&1; }
 
 # ---------------------------------------------------------------------------
-section "Packaging and OML v2"
+section "Packaging and Sqnc"
 
 "$PACK" check "$ROOT" "$CORE" >"$T/self.log" 2>&1
 check "botter's own project builds with 0 warnings" "$T/self.log" "check passed: .* 0 warning"
 
-# OML v2 (flow.md): a valid flow compiles; each kind of mistake is an error with its line and stops the build
+# Sqnc (SQNC.md): a valid flow compiles; each kind of mistake is an error with its line and stops the build
 mkagent "$T/flow_good"
 mkdir -p "$T/flow_good/skills/pitching"
 printf -- '---\nname: pitching\ndescription: p\n---\n' >"$T/flow_good/skills/pitching/SKILL.md"
-cp "$TESTS/oml_good.md" "$T/flow_good/flow.md"
+cp "$TESTS/sqnc_good.md" "$T/flow_good/SQNC.md"
 "$PACK" check "$T/flow_good" "$CORE" >"$T/lint.log" 2>&1
-check_not "OML v2: a valid flow.md has no errors or warnings" "$T/lint.log" "flow.md"
-# oml_bad NAME OLD NEW PATTERN: oml_good.md with OLD replaced by NEW must report PATTERN
-oml_bad() {
+check_not "Sqnc: a valid SQNC.md has no errors or warnings" "$T/lint.log" "SQNC.md"
+# sq_bad NAME OLD NEW PATTERN: sqnc_good.md with OLD replaced by NEW must report PATTERN
+sq_bad() {
     rm -rf "$T/flow_bad" "$T/flow_bad.bot"
     cp -r "$T/flow_good" "$T/flow_bad"
     python3 -c 'import sys;p=sys.argv[1];s=open(p).read();assert sys.argv[2] in s;open(p,"w").write(s.replace(sys.argv[2],sys.argv[3],1))' \
-        "$T/flow_bad/flow.md" "$2" "$3"
+        "$T/flow_bad/SQNC.md" "$2" "$3"
     "$PACK" build "$T/flow_bad" "$CORE" "$T/flow_bad.bot" >"$T/lint.log" 2>&1
-    check "OML v2: $1" "$T/lint.log" "$4"
+    check "Sqnc: $1" "$T/lint.log" "$4"
 }
-oml_bad "keyword typo is an error with its line" 'INVOKE SKILL' 'INVOCATE SKILL' 'flow.md:14: error: unknown keyword INVOCATE; did you mean INVOKE'
-if [ -e "$T/flow_bad.bot" ]; then fail "OML v2: a flow with errors is not built"; else pass "OML v2: a flow with errors is not built"; fi
-oml_bad "unknown tool" '`fs_read`' '`fs_reed`' 'no such tool'
-oml_bad "skill used without LOAD SKILL" 'LOAD SKILL "pitching"' '' 'add LOAD SKILL "pitching"'
-oml_bad "variable used before it is set" '`folder` }' '`fodler` }' '`fodler` is used before it is set'
-oml_bad "loop variable used after its loop" 'RETURN "Read "' 'RETURN `f.name` + "Read "' 'only exists inside its FOR EACH'
-oml_bad "mismatched END" '        END RETRY' '        END IF' 'END IF, but the RETRY opened on line 18 is still open'
-oml_bad "unclosed block" 'END FOR' '' 'this FOR EACH is never closed'
-oml_bad "IF without THEN" '"notes.txt" THEN' '"notes.txt"' 'IF reads: IF <condition> THEN'
-oml_bad "MCP CONNECT is rejected" 'LOAD SKILL "pitching"' 'LOAD SKILL "pitching"
+sq_bad "keyword typo is an error with its line" 'INVOKE SKILL' 'INVOCATE SKILL' 'SQNC.md:15: error: unknown keyword INVOCATE; did you mean INVOKE'
+if [ -e "$T/flow_bad.bot" ]; then fail "Sqnc: a flow with errors is not built"; else pass "Sqnc: a flow with errors is not built"; fi
+sq_bad "unknown tool" '`fs_read`' '`fs_reed`' 'no such tool'
+sq_bad "skill used without LOAD SKILL" 'LOAD SKILL "pitching"' '' 'add LOAD SKILL "pitching"'
+sq_bad "variable used before it is set" '`folder` }' '`fodler` }' '`fodler` is used before it is set'
+sq_bad "loop variable used after its loop" 'RETURN "Read "' 'RETURN `f.name` + "Read "' 'only exists inside its FOR EACH'
+sq_bad "mismatched END" '        END RETRY' '        END IF' 'END IF, but the RETRY opened on line 19 is still open'
+sq_bad "unclosed block" 'END FOR' '' 'this FOR EACH is never closed'
+sq_bad "IF without THEN" '"notes.txt" THEN' '"notes.txt"' 'IF reads: IF <condition> THEN'
+sq_bad "MCP CONNECT is rejected" 'LOAD SKILL "pitching"' 'LOAD SKILL "pitching"
 CONNECT mcp://x AS y' 'CONNECT \(MCP servers\) is not supported'
-oml_bad "OML v1 files are rejected" '---
+sq_bad "OML v1 files are rejected" '---
 spec-version' '<!-- OML v1: x -->
 ---
-spec-version' 'this flow.md is OML v1'
-oml_bad "a flow inside a code fence is rejected" 'LOAD SKILL "pitching"' 'LOAD SKILL "pitching"
-```oml' 'not inside a ``` code block'
-oml_bad "decisions written as prose are a warning" 'Skip it.' 'if it is empty, skip it' "flow.md:16: warning: write 'if' as an OML statement"
+spec-version' 'uses the old OML v1 syntax'
+sq_bad "a flow outside a \`\`\`sqnc block is rejected" '```sqnc' '' 'no ```sqnc code block'
+sq_bad "an unclosed \`\`\`sqnc block is rejected" 'RETURN "Read " + `files.length` + " files"
+```' 'RETURN "Read " + `files.length` + " files"' 'is never closed with ```'
+sq_bad "decisions written as prose are a warning" 'Skip it.' 'if it is empty, skip it' "SQNC.md:17: warning: write 'if' as a Sqnc statement"
 
 # ---------------------------------------------------------------------------
 section "Runtime: network modes, sandbox, system prompt (stub LLM)"
@@ -120,7 +121,7 @@ shell_call "echo hello-from-tool"
 drive "$T/on.bot" "$T/ws" PATH=/usr/bin:/bin
 check "tool loop: shell_exec runs and its output reaches the LLM" "$T/rec/tool.txt" "hello-from-tool"
 check "online agent: system prompt says internet access" "$T/rec/system.txt" "You have internet access"
-check_not "no flow.md: no flow instruction in the system prompt" "$T/rec/system.txt" "read flow.md"
+check_not "no SQNC.md: no flow instruction in the system prompt" "$T/rec/system.txt" "driven by its SQNC.md"
 
 shell_call "python3 -c \"import socket;socket.create_connection(('127.0.0.1',$PORT));print('NET-OK')\""
 drive "$T/on.bot" "$T/ws"
@@ -215,11 +216,53 @@ drive "$T/skilled.bot" "$T/ws"
 check "system prompt lists skills with their frontmatter descriptions" "$T/rec/system.txt" "skills/pitching/SKILL.md: Write one specific idea per lead"
 
 mkagent "$T/flowagent"
-cp -r "$T/flow_good/flow.md" "$T/flow_good/skills" "$T/flowagent/"
+cp -r "$T/flow_good/SQNC.md" "$T/flow_good/skills" "$T/flowagent/"
 build "$T/flowagent" "$T/flow.bot"
 stub_start --text /dev/null
-drive "$T/flow.bot" "$T/ws"
-check "flow.md present: system prompt tells the agent to follow it" "$T/rec/system.txt" "read flow.md \\(vfs_read\\): the flow of this session in OML v2"
+(cd "$T/ws" && printf '6\nhttp://127.0.0.1:%s/v1\n\nstub\ngo\nhello after the flow\n/exit\n' "$PORT" |
+    timeout 60 "$T/flow.bot" >"$T/out" 2>&1)
+check "SQNC.md present: the flow starts by itself" "$T/out" "Which folder\\?"
+check "SQNC.md present: system prompt explains the [Sqnc] steps" "$T/rec/system.txt" "session is driven by its SQNC.md flow"
+
+# Sqnc interpreter: botcore runs the structure; only prose goes to the LLM
+mkagent "$T/sqagent"
+cp "$TESTS/sqnc_run.md" "$T/sqagent/SQNC.md"
+build "$T/sqagent" "$T/sq.bot"
+sq_drive() {
+    rm -rf "$T/sqws"; mkdir -p "$T/sqws"
+    (cd "$T/sqws" && printf '6\nhttp://127.0.0.1:%s/v1\n\nstub\nAlice\n/exit\n' "$PORT" |
+        timeout 60 "$T/sq.bot" >"$T/out" 2>&1)
+}
+stub_start --sqnc yes
+sq_drive
+check "Sqnc: ASK USER shows the question" "$T/out" "What is your name\\?"
+check "Sqnc: RETURN joins the answer, a prose decision and .length" "$T/out" "Hi Alice, mood happy, 3 items"
+check "Sqnc: STEP headings are shown" "$T/out" "Step 2 · WORK"
+check "Sqnc: EXECUTE runs the tool itself" "$T/out" "Running a command"
+check "Sqnc: RETRY repeats a failing step" "$T/out" "Retrying \\(2 of 2\\)"
+check "Sqnc: SAVE TO FILE writes the value" "$T/sqws/out/items.json" '"b"'
+n=$(grep -c "" "$T/rec/sqnc.txt" 2>/dev/null)
+if [ "$n" = 2 ]; then pass "Sqnc: only prose reaches the LLM (2 calls for the whole flow)"; else fail "Sqnc: only prose reaches the LLM (2 calls for the whole flow)" "LLM calls: $n"; fi
+check "Sqnc: FOR EACH + IF run the plain-English step for the matching item" "$T/rec/sqnc.txt" "line 16\\] Mention the letter"
+check "Sqnc: a prose condition is decided by the LLM" "$T/rec/sqnc.txt" "Decide whether this condition is true right now: the user seems happy"
+stub_start --sqnc no
+sq_drive
+check "Sqnc: the LLM's 'no' takes the ELSE branch" "$T/out" "Hi Alice, mood sad"
+
+# sqnc_review: the LLM's logic check of a project's SQNC.md (builder agents only)
+mkagent "$T/builder" '{"builder": true}'
+build "$T/builder" "$T/builder.bot"
+mkdir -p "$T/revws"
+cp "$TESTS/sqnc_run.md" "$T/revws/SQNC.md"
+echo "An agent that greets people." >"$T/revws/agent.md"
+tool_call sqnc_review '{}'
+drive "$T/builder.bot" "$T/revws"
+check "sqnc_review: the verdict reaches the agent" "$T/rec/tool.txt" '"makes_sense":false'
+check "sqnc_review: the report says why and what to do instead" "$T/rec/tool.txt" "why: reads a file that is never written"
+check "sqnc_review: the reviewer gets SQNC.md with line numbers and agent.md" "$T/rec/review.txt" "An agent that greets people"
+tool_call sqnc_review '{}'
+drive "$T/on.bot" "$T/revws"
+check "sqnc_review: not available to ordinary agents" "$T/rec/tool.txt" "unknown tool 'sqnc_review'"
 
 shell_call "echo no-curl-needed"
 drive "$T/on.bot" "$T/ws" PATH=/nonexistent
@@ -324,8 +367,8 @@ if command -v tmux >/dev/null 2>&1; then
     tmux kill-session -t botter-test 2>/dev/null
     check "Ctrl-C cancels an in-flight LLM request within a second" "$T/tmux.txt" "\\(interrupted\\)"
 
-    # Botter's TUI: messages reach the model tagged [N]; the header is gone after the first message
-    stub_start --text /dev/null
+    # Botter's TUI: its flow asks first; the first message answers it, later ones are chat tagged [N]
+    stub_start --sqnc yes
     tmux new-session -d -s botter-test -x 100 -y 30 -c "$T/ws" "env BOTTER_THEME=dark $BOTTER"
     sleep 0.8
     for k in 6 Enter "http://127.0.0.1:$PORT/v1" Enter Enter stub Enter; do
@@ -342,10 +385,11 @@ if command -v tmux >/dev/null 2>&1; then
     check "TUI: messages reach the model tagged with their number" "$T/rec/user.txt" "^\\[2\\] second message"
     check "TUI: the model is told what the numbers mean" "$T/rec/system.txt" "numbers each user message and your reply"
     check_not "TUI: header is gone after the first message" "$T/tui.txt" "the agent that builds agents"
-    if head -3 "$T/tui.txt" | grep -q "first message"; then pass "TUI: the first message is at the top"; else fail "TUI: the first message is at the top"; fi
+    if head -4 "$T/tui.txt" | grep -q "What agent should I build"; then pass "TUI: the flow's question stays at the top when the header goes"; else fail "TUI: the flow's question stays at the top when the header goes"; fi
+    check "TUI: the first message answered the flow" "$T/rec/sqnc.txt" "Answer the question"
 
     # TUI after a tool call: streamed reply shown once, tool internals hidden
-    tool_call shell_exec '{"command":"echo hi"}'
+    stub_start --sqnc yes --tool shell_exec --args '{"command":"echo hi"}'
     tmux new-session -d -s botter-test -x 100 -y 30 -c "$T/ws" "env BOTTER_THEME=dark $BOTTER"
     sleep 0.8
     for k in 6 Enter "http://127.0.0.1:$PORT/v1" Enter Enter stub Enter; do
@@ -353,6 +397,8 @@ if command -v tmux >/dev/null 2>&1; then
         sleep 0.3
     done
     sleep 0.8
+    tmux send-keys -t botter-test "hello" Enter
+    sleep 1
     tmux send-keys -t botter-test "run it" Enter
     sleep 1.5
     tmux capture-pane -t botter-test -p >"$T/tui.txt"

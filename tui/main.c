@@ -567,14 +567,24 @@ static void lay_user_cell(tlines_t *L, const char *t, size_t n, int w)
 }
 
 /* First chat message: the header and connect-flow lines go, so the conversation starts at the top. */
+static int g_keep_from = -1; /* "flow" event: blocks from here on (the flow's first question) survive the clear */
+
+/* First message: drop the header and the connect lines (but not what a running flow already said). */
 static void blk_clear_all(void)
 {
-    for (int i = 0; i < g_nb; i++) {
+    int n = g_keep_from >= 0 && g_keep_from <= g_nb ? g_keep_from : g_nb;
+    for (int i = 0; i < n; i++) {
         tsb_free(&g_b[i].text);
         free(g_b[i].extra);
         tl_free(&g_b[i].L);
     }
-    g_nb = 0;
+    memmove(g_b, g_b + n, (size_t)(g_nb - n) * sizeof(*g_b));
+    g_nb -= n;
+    if (g_nb > 0) {
+        g_b[0].sep = 0;
+        g_b[0].lw = -1;
+    }
+    g_keep_from = -1;
     g_scroll = 0;
     g_last_total = -1;
 }
@@ -1437,6 +1447,10 @@ static void on_record(const char *json)
                 g_stashed = 1;
             }
             ed_clear();
+        }
+    } else if (!strcmp(ev, "flow")) {
+        if (g_cell == 0) {
+            g_keep_from = g_nb;
         }
     } else if (!strcmp(ev, "mode")) {
         g_plan = !strcmp(jstr(j, "mode"), "plan");

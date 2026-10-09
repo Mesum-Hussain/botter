@@ -1,5 +1,5 @@
 {
-  "description": "Build an agent project into a single self-contained executable '<project folder name>.bot' (the botcore runtime plus the project's agent.md, agent.json, flow.md, skills/, tools/doc/ and tools/bin/ appended read-only). Validates tools first and reports errors and warnings. Use dry_run=true to only validate. The project and the output must be inside the working directory. No compiler is involved.",
+  "description": "Build an agent project into a single self-contained executable '<project folder name>.bot' (the botcore runtime plus the project's agent.md, agent.json, SQNC.md, skills/, tools/doc/ and tools/bin/ appended read-only). Validates tools first and reports errors and warnings. Use dry_run=true to only validate. The project and the output must be inside the working directory. No compiler is involved.",
   "parameters": {
     "type": "object",
     "properties": {

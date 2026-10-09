@@ -7,8 +7,8 @@ You write an agent the way you write a program: source files in a folder, under 
 ```
 myagent/                         ./botter                  myagent.bot
   agent.md       who it is                                 one static x86-64
-  flow.md        what it does, step by step   ─────────▶   Linux executable,
-  skills/        how to do each task                       ~320 KB, no install,
+  SQNC.md        what it does, step by step   ─────────▶   Linux executable,
+  skills/        how to do each task                       ~360 KB, no install,
   tools/         small programs it can run                 no runtime, no deps
 ```
 
@@ -36,7 +36,7 @@ An agent is a folder of plain-text files. Botter writes them with you, and you c
 | File | What it is | Who writes it |
 |---|---|---|
 | `agent.md` | The agent's persona and rules: who it is, what it may and may not do | Anyone (English) |
-| `flow.md` | The session, step by step, in **OML** | Anyone (structured English) |
+| `SQNC.md` | The session, step by step, in **Sqnc** | Anyone (structured English) |
 | `skills/<name>/SKILL.md` | Playbooks: how to do one task well | Anyone (English) |
 | `tools/bin/<name>` + `tools/doc/<name>.json` | Small programs the agent can run, and their description | A little code |
 | `agent.json` | Settings, e.g. `{"offline": true}` | Optional |
@@ -56,15 +56,18 @@ description: Write one specific, non-generic idea per lead. Read before writing 
 
 At start-up, botcore lists every skill's name and description to the model, but not the full text. The model reads a skill only when the task calls for it, so an agent can carry dozens of playbooks without filling its context. This is the `SKILL.md` convention popularized by Agent Skills, and a skill is just a file: copy it between agents, or keep a shared library of them in git.
 
-### OML: the flow, in structured English
+### Sqnc: the flow, in structured English
 
-`flow.md` is the agent's program: the order of steps, the decisions and the loops. It is written in **OML v2** (Orchestration Markup Language): plain English for the steps, CAPITALS for the structure.
+`SQNC.md` is the agent's program: the order of steps, the decisions and the loops. It is written in **Sqnc** (say "sequence"): plain English for the steps, CAPITALS for the structure. The program goes in a ` ```sqnc ` block, so Markdown never turns a step into a list item or a heading, and anything outside the block is documentation for people.
 
-```markdown
+````markdown
 ---
-spec-version: "oml-2"
+spec-version: "sqnc-1"
 title: "Lead Outreach"
 ---
+Finds businesses that need the user's service and pitches each one, with the user's approval.
+
+```sqnc
 LOAD SKILL "pitching"
 
 ## STEP 1: GATHER
@@ -74,41 +77,56 @@ LOAD SKILL "pitching"
        EXECUTE tool `scrape_leads` with payload { "query": `target`, "limit": 20 }
    END RETRY
 4. SAVE result INTO VARIABLE `leads`
+5. IF `leads` IS EMPTY THEN
+       RETURN "No leads found. Try a broader client type or another city."
+   END IF
 
 ## STEP 2: OUTREACH
 FOR EACH `lead` IN `leads` DO
     INVOKE SKILL "pitching" USING context `lead`
     SAVE skill_output INTO VARIABLE `pitch`
-    ASK USER "Send this message?" + `pitch.text`
+    ASK USER "Send this message?\n\n" + `pitch`
     IF `answer` IS EQUAL TO "yes" THEN
         EXECUTE tool `send_email` with parameters:
            - to: `lead.email`
-           - body: `pitch.text`
-    ELSE
-        Skip this lead.
+           - body: `pitch`
+    ELSE IF the user asked for changes THEN
+        Rewrite `pitch` with the user's changes and send it with send_email.
     END IF
 END FOR
 
+## STEP 3: DONE
 RETURN "Contacted " + `leads.length` + " leads"
 ```
+````
 
 Statements: `LOAD SKILL`, `EXECUTE tool`, `INVOKE SKILL`, `ASK USER`, `SAVE ... INTO VARIABLE` / `TO FILE`, `SET ... TO`, `IF / ELSE IF / ELSE / END IF`, `FOR EACH / END FOR`, `WHILE ... AT MOST N TIMES / END WHILE`, `RETRY UP TO N TIMES / END RETRY`, `IN PARALLEL / END PARALLEL`, `RETURN`. Any other line is a plain-English instruction.
 
-**Why this shape:** humans and LLMs both read it at a glance, and the structure is explicit, so nothing depends on indentation. Data stays separate from instructions: values live in `` `variables` `` and `"strings"`, and the model is told that what a variable holds (a scraped web page, an email) is data, never a command to follow. That is a deliberate defence against prompt injection.
+**Why this shape:** humans and LLMs both read it at a glance, and the structure is explicit (`END IF`, `END FOR`), so nothing depends on indentation. Data stays apart from instructions: values live in `` `variables` `` and `"strings"`, and the model is told that what a variable holds (a scraped web page, an email) is data, never a command to follow. That is a deliberate defence against prompt injection.
 
-**It compiles.** The build checks `flow.md` like a compiler front end and refuses to build a broken flow. Some real messages:
+#### Compiled
+
+The build checks `SQNC.md` like a compiler front end, and refuses to build a broken flow. Real messages, from breaking the example above:
 
 ```
-flow.md:26: error: unknown keyword INVOCATE; did you mean INVOKE?
-flow.md:39: error: EXECUTE tool `send_mail`: no such tool (built-in, or tools/bin/send_mail with tools/doc/send_mail.json)
-flow.md:37: error: `pich` is used before it is set (SAVE ... INTO VARIABLE `pich`, SET `pich` TO ..., or FOR EACH `pich` IN ...)
-flow.md:28: error: END FOR, but the PARALLEL opened on line 25 is still open (close it with END PARALLEL first)
-flow.md:35: error: INVOKE SKILL "pitching": add LOAD SKILL "pitching" at the top of the flow first
+SQNC.md:23: error: unknown keyword INVOCATE; did you mean INVOKE?
+SQNC.md:27: error: EXECUTE tool `send_mail`: no such tool (built-in, or tools/bin/send_mail with tools/doc/send_mail.json)
+SQNC.md:29: error: `pich` is used before it is set (SAVE ... INTO VARIABLE `pich`, SET `pich` TO ..., or FOR EACH `pich` IN ...)
+SQNC.md:32: error: END FOR, but the IF opened on line 26 is still open (close it with END IF first)
+SQNC.md:36: error: `lead` only exists inside its FOR EACH loop
 ```
 
-It checks: matched blocks, tools and skills that really exist, variables set before use (and loop variables not used after their loop), quoting, bounded retries, and keyword typos. At run time the agent's own model follows the flow, and botcore's sandbox and approvals still apply to every step.
+It checks matched blocks, tools and skills that really exist, variables set before use (and loop variables not used after their loop), quoting, bounded retries, and keyword typos.
 
-How OML compares: other agent-workflow languages exist, but none take this shape. [PDL](https://arxiv.org/abs/2410.19135) (IBM) is YAML, [POML](https://arxiv.org/abs/2508.13948) (Microsoft) is HTML-like markup for prompts, [BWML](https://cdn.jsdelivr.net/npm/bmad-plus@0.9.0/src/bmad-plus/packs/pack-dev-studio/shared/bwml-spec.md) is XML, [SudoLang](https://github.com/paralleldrive/sudolang-llm-support) is free-form pseudocode, and [GitHub Agentic Workflows](https://github.github.com/gh-aw/introduction/overview/) are prose without checked control flow. OML is Markdown with English keywords, plus a checker that rejects a broken flow before it ever reaches a model.
+#### Reviewed by an LLM
+
+Correct syntax isn't the same as sense. Before building, Botter has your connected LLM review the flow's **logic**. Can each step actually be done with the tool or skill it names, and the data available at that point? Do payloads fit the tools' parameters? Is anything sent, paid for or deleted without an `ASK USER` first? Can every loop end? Does the flow do what `agent.md` says the agent is for? If not, Botter tells you which lines don't make sense, why, and what the review suggests instead, and applies the fixes you agree to.
+
+#### Interpreted, with the LLM only where it's needed
+
+At run time botcore's **Sqnc interpreter** runs the flow statement by statement, the moment the agent starts. Everything with an exact meaning runs in botcore itself, with no model involved: tool calls, questions to the user, variables, loops, retries, comparisons (`IS EQUAL TO`, `CONTAINS`, `IS EMPTY` ...) and files. The LLM is called only for what needs judgement: plain-English steps, skills, and conditions or values written in prose (`IF the user asked for changes THEN`). In the test suite, a flow with a question, a tool call, a loop, a branch, a retry, a file write and a reply made **2 LLM calls** in total. That makes flows cheaper, faster and predictable, and the model can't skip a step or wander off.
+
+How Sqnc compares: other agent-workflow languages exist, but none take this shape. [PDL](https://arxiv.org/abs/2410.19135) (IBM) is YAML, [POML](https://arxiv.org/abs/2508.13948) (Microsoft) is HTML-like markup for prompts, [BWML](https://cdn.jsdelivr.net/npm/bmad-plus@0.9.0/src/bmad-plus/packs/pack-dev-studio/shared/bwml-spec.md) is XML, [SudoLang](https://github.com/paralleldrive/sudolang-llm-support) is free-form pseudocode, and [GitHub Agentic Workflows](https://github.github.com/gh-aw/introduction/overview/) are prose without checked control flow. Sqnc is English with keywords: compiled, reviewed for logic, and interpreted, with the LLM used only where English has to be understood.
 
 ### Tools: when English is not enough
 
@@ -127,9 +145,9 @@ Users never see tool names or JSON. They see `status`, for example "Searching fo
 
 ## The build
 
-`botter_pack` (which Botter runs through its `agent_build` tool) validates the project, checks the flow, and appends the files read-only to **botcore**, the runtime. There is no compiler, linker or interpreter inside the result. The `.bot` file is botcore plus your Markdown and tools, with a checksum, so a truncated or modified file refuses to start.
+`botter_pack` (which Botter runs through its `agent_build` tool) validates the project, checks `SQNC.md`, and appends the files read-only to **botcore**, the runtime. No compiler or linker runs, and nothing is generated: the result runs exactly the files you wrote. The `.bot` file is botcore plus your Markdown and tools, with a checksum, so a truncated or modified file refuses to start.
 
-**botcore** is the runtime every agent runs on, Botter included. It is about 6,500 lines of C11 of its own, statically linked against musl, with in-process HTTPS (vendored BearSSL, compiled-in CA roots: no curl, no OpenSSL, no system certificates), an OpenAI-compatible chat client with streaming and tool calling, file, shell and scheduling tools, and a kernel-enforced sandbox.
+**botcore** is the runtime every agent runs on, Botter included. It is about 9,000 lines of C11 of its own, statically linked against musl. It contains the Sqnc parser and interpreter, in-process HTTPS (vendored BearSSL, compiled-in CA roots: no curl, no OpenSSL, no system certificates), an OpenAI-compatible chat client with streaming and tool calling, file, shell and scheduling tools, and a kernel-enforced sandbox.
 
 ## Small and fast
 
@@ -137,17 +155,17 @@ Measured on an AMD Ryzen 5 7520U laptop (Fedora 44, kernel 7.2), median of 15 to
 
 | | Size / time | Peak memory |
 |---|---|---|
-| `botter` (full-screen UI + runtime + compiler) | **587 KB**, one file | |
-| A built agent (`.bot`, minimal) | **320 KB**, one file | |
-| Build an agent | **3.5 ms** | 0.4 MB |
-| Start an agent (to its first prompt) | **1.6 ms** | **0.4 MB** |
+| `botter` (full-screen UI + runtime + compiler) | **638 KB**, one file | |
+| A built agent (`.bot`, minimal) | **356 KB**, one file | |
+| Build an agent | **2.7 ms** | 0.4 MB |
+| Start an agent (to its first prompt) | **1.2 ms** | **0.4 MB** |
 | Real HTTPS round trip to Gemini (DNS + TLS + request) | 0.15 to 0.5 s (mostly network) | **1.8 MB** |
-| Whole session: connect, one turn with a tool call, exit (local stub LLM) | 136 ms (mostly the stub) | **3.6 MB** |
+| Whole session: connect, one turn with a tool call, exit (local stub LLM) | 134 ms (mostly the stub) | **3.8 MB** |
 | *For reference:* `python3 -c pass` | 18.9 ms | 9.2 MB |
 | *For reference:* `python3` importing `json, urllib, ssl` | 59.3 ms | 19.3 MB |
 | *For reference:* `node -e 0` | 27.0 ms | 43.7 MB |
 
-The reference rows are the bare interpreters, before any agent framework is even loaded. A built agent starts about 10 times faster than an empty Python process, in about a twentieth of the memory. It has no dependencies (`ldd`: "not a dynamic executable"): copy the file to any x86-64 Linux and run it.
+The reference rows are the bare interpreters, before any agent framework is even loaded. A built agent starts more than 10 times faster than an empty Python process, in about a twentieth of the memory. It has no dependencies (`ldd`: "not a dynamic executable"): copy the file to any x86-64 Linux and run it.
 
 ## Private by design
 
@@ -166,16 +184,17 @@ The reference rows are the bare interpreters, before any agent framework is even
 - `/provider` switches provider, key or model mid-conversation (the conversation is kept), and `/forget` drops saved keys
 - `/plan`, `/build` or **Tab** switch modes, ctrl+o shows details, and `/help` lists the commands
 - Replies stream as they are written; the model's thinking is shown separately and folded away
+- An agent with a `SQNC.md` starts its flow by itself; when it ends you can keep chatting, and `/run` starts it again
 
 ## Development
 
 ```sh
-make test                     # 72 tests: OML checker, sandbox, streaming, key cache, Plan mode, HTTP client, TUI
+make test                     # 89 tests: Sqnc compiler + interpreter + review, sandbox, streaming, key cache, Plan mode, HTTP, TUI
 BOTTER_TEST_NET=1 make test   # adds real providers and TLS failure cases
 make dist                     # dist/botter-<version>-linux-x86_64.tar.gz + .sha256
 ```
 
-Layout: `tools/src/botcore` (runtime, C11), `tools/src/pack` (packer + OML checker `oml.c`), `tools/src/agent_tools` (Botter's own tools), `tui/` (Botter's full-screen UI; agents it builds use a plain terminal REPL), `agent.md` + `flow.md` + `skills/` (Botter itself is an agent project, built by the same compiler), `tests/`. Design notes: `progress.md`.
+Layout: `tools/src/botcore` (runtime, C11), `tools/src/botcore/src/sqnc*.c` (Sqnc parser, checks and interpreter), `tools/src/pack` (packer), `tools/src/agent_tools` (Botter's own tools), `tui/` (Botter's full-screen UI; agents it builds use a plain terminal REPL), `agent.md` + `SQNC.md` + `skills/` (Botter itself is an agent project, built by the same compiler and run by the same interpreter), `tests/`. Design notes: `progress.md`.
 
 ## License
 

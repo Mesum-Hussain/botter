@@ -63,6 +63,13 @@ void chat_set_events(chat_t *c, void (*cb)(void *, int, const char *), void *ud,
 /* Set (or, with NULL/"", clear) the system prompt. Never trimmed from history. */
 int  chat_set_system(chat_t *c, const char *text);
 
+/*
+ * A side question: with_history = the whole conversation plus `question` (as a
+ * user message), else just `system` + `question`. No tools, not streamed, and
+ * the history is not changed. *reply has reasoning (<think> blocks) removed.
+ */
+int  chat_ask(chat_t *c, const char *system, const char *question, int with_history, char **reply, char **err);
+
 /* GET {base}/models. On failure *err is a malloc'd message. */
 int  chat_validate(chat_t *c, char **err);
 

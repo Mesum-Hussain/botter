@@ -30,6 +30,9 @@ extern const tool_t TOOLS_CRON[];
 extern const size_t TOOLS_CRON_N;
 extern const tool_t TOOLS_VFS[]; /* registered only when an agent pack is linked */
 extern const size_t TOOLS_VFS_N;
+extern const tool_t TOOLS_REVIEW[]; /* sqnc_review: builder agents only (tools_enable_review) */
+extern const size_t TOOLS_REVIEW_N;
+void tools_enable_review(int on);
 
 /* Child-side sandbox (after fork, before exec). net = keep host network. 0 ok, -1 refuse to run. */
 int    tool_sandbox_apply(int cpu_s, int net);

@@ -15,7 +15,10 @@
  *     {"ev":"thinking","text":..}                      model reasoning
  *     {"ev":"text","text":..}                          assistant text sent alongside tool calls
  *     {"ev":"reply","text":..}                         final answer (markdown)
- *     {"ev":"tool","name":..,"args":..} / {"ev":"tool_result","text":..}
+ *     {"ev":"tool","name":..,"args":..,"status":..} / {"ev":"tool_result","text":..}
+ *     {"ev":"delta","kind":"text"|"thinking","text":..}  streamed piece of a reply
+ *     {"ev":"mode","mode":"plan"|"build"}             Plan/Build mode
+ *     {"ev":"flow"}                                   the agent's SQNC.md flow starts
  * UI -> botcore (stdin, one JSON object per line, answers a prompt):
  *     {"line":<text>} | {"eof":true} | {"intr":true}
  *   Interrupting work = SIGINT to the botcore process.

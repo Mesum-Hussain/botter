@@ -6,8 +6,8 @@
  *   botter_pack list  <file.bot>
  *
  * Embeds (read-only) from <agent-dir>:
- *   agent.md, agent.json, flow.md, skills/, tools/doc/ (recursive)   plain files
- *       (flow.md is optional: the session flow in OML v2, checked by oml.c; errors stop the build)
+ *   agent.md, agent.json, SQNC.md, skills/, tools/doc/ (recursive)   plain files
+ *       (SQNC.md is optional: the session flow in Sqnc, checked by botcore/src/sqnc.c; errors stop the build)
  *       (agent.json is optional: {"offline": true} makes the agent offline; default online)
  *   tools/bin/<name>                                 tool executables: either a
  *       native ELF x86-64 binary (any language that compiles to one) or a script
@@ -313,10 +313,22 @@ static int has_item(const char *path)
     return 0;
 }
 
-#include "oml.c"
+#include "../botcore/src/sqnc.c"
 
-/* Names OML's EXECUTE tool may use: botcore's built-ins and this agent's tools/bin. */
-static int oml_has_tool(const char *name)
+/* Sqnc diagnostics in compiler form: SQNC.md:LINE: error|warning: message */
+static void sqnc_diag(void *ud, int line, int error, const char *msg)
+{
+    (void)ud;
+    fprintf(stderr, "SQNC.md:%d: %s: %s\n", line, error ? "error" : "warning", msg);
+    if (error) {
+        errors++;
+    } else {
+        warnings++;
+    }
+}
+
+/* Names Sqnc's EXECUTE tool may use: botcore's built-ins and this agent's tools/bin. */
+static int sqnc_has_tool(const char *name)
 {
     static const char *const builtin[] = {"fs_list",  "fs_read",   "fs_write",  "shell_exec", "vfs_list", "vfs_read",
                                           "get_time", "cron_set",  "cron_list", "cron_delete", NULL};
@@ -325,12 +337,21 @@ static int oml_has_tool(const char *name)
             return 1;
         }
     }
+    if (strcmp(name, "sqnc_review") == 0) { /* only for builder agents: agent.json {"builder": true} */
+        for (size_t i = 0; i < n_items; i++) {
+            if (strcmp(items[i].path, "agent.json") == 0 && items[i].data) {
+                const char *b = strstr(items[i].data, "\"builder\"");
+                return b && strncmp(b + 9 + strspn(b + 9, " :\t"), "true", 4) == 0;
+            }
+        }
+        return 0;
+    }
     char p[300];
     snprintf(p, sizeof(p), "tools/bin/%s", name);
     return has_item(p);
 }
 
-static int oml_has_skill(const char *name)
+static int sqnc_has_skill(const char *name)
 {
     char p[300];
     snprintf(p, sizeof(p), "skills/%s/SKILL.md", name);
@@ -433,7 +454,17 @@ static int cmd_build(const char *dir, const char *botcore, const char *out)
 
     add_root_file(dir, "agent.md");
     add_root_file(dir, "agent.json");
-    add_root_file(dir, "flow.md");
+    add_root_file(dir, "SQNC.md");
+    static const char *const old_names[] = {"FLOW.md", "flow.md"};
+    for (int k = 0; k < 2 && !has_item("SQNC.md"); k++) {
+        char *lf = join(dir, old_names[k]);
+        struct stat lst;
+        if (lstat(lf, &lst) == 0 && S_ISREG(lst.st_mode)) {
+            warn("%s: the flow file is now called SQNC.md; rename it (embedded as SQNC.md this time)", lf);
+            add_item("SQNC.md", lf, K_DATA);
+        }
+        free(lf);
+    }
     add_tree(dir, "skills", K_DATA, 0);
     add_tree(dir, "tools/doc", K_DATA, 0);
     add_tree(dir, "tools/bin", K_DATA, 1);
@@ -454,12 +485,18 @@ static int cmd_build(const char *dir, const char *botcore, const char *out)
     }
     free(mf);
     for (size_t i = 0; i < n_items; i++) {
-        if (strcmp(items[i].path, "flow.md") == 0 && items[i].data) {
-            oml_check(items[i].data, items[i].len, oml_has_tool, oml_has_skill);
+        if (strcmp(items[i].path, "SQNC.md") == 0 && items[i].data) {
+            sq_prog prog;
+            memset(&prog, 0, sizeof(prog));
+            prog.diag = sqnc_diag;
+            if (sq_parse(items[i].data, items[i].len, &prog) == 0) {
+                sq_check(&prog, sqnc_has_tool, sqnc_has_skill);
+            }
+            sq_free(&prog);
         }
     }
-    if (errors) { /* a flow.md that does not compile is not built */
-        fprintf(stderr, "botter_pack: flow.md has %d error(s); nothing was built\n", errors);
+    if (errors) { /* a SQNC.md that does not compile is not built */
+        fprintf(stderr, "botter_pack: SQNC.md has %d error(s); nothing was built\n", errors);
         return 1;
     }
 

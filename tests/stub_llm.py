@@ -21,6 +21,7 @@ ap.add_argument("--text")
 ap.add_argument("--slow", action="store_true")
 ap.add_argument("--nostream", action="store_true", help='answer 400 to "stream": true')
 ap.add_argument("--think", action="store_true", help="start the text answer with a <think> block")
+ap.add_argument("--sqnc", choices=["yes", "no"], help="answer Sqnc interpreter requests (decisions = this word)")
 a = ap.parse_args()
 os.makedirs(a.record, exist_ok=True)
 
@@ -96,7 +97,27 @@ class H(BaseHTTPRequestHandler):
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()
 
-        if a.text:
+        if msgs and msgs[0]["role"] == "system" and msgs[0]["content"].startswith("You review SQNC.md"):
+            save("review.txt", msgs[-1]["content"])
+            reply({"content": json.dumps({"makes_sense": False, "summary": "one step cannot work",
+                                          "problems": [{"line": 7, "statement": "EXECUTE tool `fs_read`",
+                                                        "why": "reads a file that is never written",
+                                                        "suggestion": "write the file first"}]})})
+        elif a.sqnc and users and users[-1]["content"].startswith("[Sqnc") and msgs[-1]["role"] == "user":
+            last = users[-1]["content"]
+            with open(os.path.join(a.record, "sqnc.txt"), "a") as f:
+                f.write(last.split("\n")[0] + "\n")
+            if last.startswith("[Sqnc] Decide"):
+                reply({"content": a.sqnc})
+            elif last.startswith("[Sqnc] Work out"):
+                reply({"content": '"worked-out value"'})
+            elif last.startswith("[Sqnc] Build the JSON"):
+                reply({"content": "{}"})
+            elif last.startswith("[Sqnc final step"):
+                reply({"content": "All done, final message."})
+            else:
+                reply({"content": "did: " + last.split("\n")[0][:80]})
+        elif a.text:
             reply({"content": open(a.text).read()})
         elif a.tool and msgs[-1]["role"] != "tool":
             call = {"id": "c1", "type": "function", "function": {"name": a.tool, "arguments": a.args}}

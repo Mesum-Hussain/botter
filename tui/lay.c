@@ -613,7 +613,7 @@ static void lay_inline(tlines_t *L, const char *s, size_t n, tsty_t base, int wi
 
 /* ---------------- code highlighting ---------------- */
 
-enum { LG_NONE, LG_C, LG_HASH, LG_DASH, LG_DIFF, LG_JSON, LG_MD, LG_OML };
+enum { LG_NONE, LG_C, LG_HASH, LG_DASH, LG_DIFF, LG_JSON, LG_MD, LG_SQNC };
 
 static int lang_of(const char *l, size_t n)
 {
@@ -656,8 +656,8 @@ static int lang_of(const char *l, size_t n)
     if (!strcmp(b, "md") || !strcmp(b, "markdown")) {
         return LG_MD;
     }
-    if (!strcmp(b, "oml")) {
-        return LG_OML;
+    if (!strcmp(b, "sqnc") || !strcmp(b, "oml")) {
+        return LG_SQNC;
     }
     return LG_NONE;
 }
@@ -692,11 +692,11 @@ static int is_kw(const char *s, size_t n)
 static int id_char(char ch) { return isalnum((unsigned char)ch) || ch == '_' || (unsigned char)ch >= 0x80; }
 
 /*
- * OML v2 (botter flow.md): UPPERCASE keywords (EXECUTE, IF ... THEN, END FOR,
+ * Sqnc (botter SQNC.md): UPPERCASE keywords (EXECUTE, IF ... THEN, END FOR,
  * IS EQUAL TO ...), `variables`, "strings", numbers, list markers, STEP
  * headings and frontmatter. Everything else is plain English.
  */
-static int oml_kw(const char *s, size_t n)
+static int sqnc_kw(const char *s, size_t n)
 {
     static const char *const KW[] = {"LOAD", "SKILL", "FROM", "EXECUTE", "INVOKE", "USING", "SAVE", "INTO", "VARIABLE",
                                      "TO", "FILE", "SET", "ASK", "USER", "IF", "THEN", "ELSE", "END", "FOR", "EACH",
@@ -711,7 +711,7 @@ static int oml_kw(const char *s, size_t n)
     return 0;
 }
 
-static void oml_line(tcells_t *c, const char *s, size_t n)
+static void sqnc_line(tcells_t *c, const char *s, size_t n)
 {
     uint32_t B = T.code_bg;
     tsty_t plain = sty_bg(T.text, B, 0), kw = sty_bg(T.kw, B, TA_BOLD), str = sty_bg(T.str, B, 0),
@@ -767,7 +767,7 @@ static void oml_line(tcells_t *c, const char *s, size_t n)
             while (e < n && id_char(s[e])) {
                 e++;
             }
-            int k = oml_kw(s + i, e - i) || (e - i == 4 && !strncmp(s + i, "tool", 4) && i >= 8 &&
+            int k = sqnc_kw(s + i, e - i) || (e - i == 4 && !strncmp(s + i, "tool", 4) && i >= 8 &&
                                              !strncmp(s + i - 8, "EXECUTE ", 8));
             tc_add(c, s + i, e - i, k ? kw : plain);
             i = e;
@@ -802,8 +802,8 @@ static void code_line(tcells_t *c, const char *s, size_t n, int lang, int *blk)
         tc_add(c, s, n, plain);
         return;
     }
-    if (lang == LG_OML) {
-        oml_line(c, s, n);
+    if (lang == LG_SQNC) {
+        sqnc_line(c, s, n);
         return;
     }
     size_t i = 0;
@@ -1164,10 +1164,10 @@ void lay_markdown(tlines_t *L, const char *md, int width)
             while (lang + langn < e && !isspace((unsigned char)lang[langn]) && lang[langn] != '{') {
                 langn++;
             }
-            /* "```python oml": highlighted as Python by GitHub/editors, as OML here */
+            /* "```python sqnc": highlighted as Python by GitHub/editors, as Sqnc here */
             for (const char *w = lang + langn; w + 3 <= e; w++) {
-                if (isspace((unsigned char)w[-1]) && !strncmp(w, "oml", 3) && (w + 3 == e || isspace((unsigned char)w[3]))) {
-                    lang = "oml";
+                if (isspace((unsigned char)w[-1]) && !strncmp(w, "sqnc", 4) && (w + 4 == e || isspace((unsigned char)w[4]))) {
+                    lang = "sqnc";
                     langn = 3;
                     break;
                 }

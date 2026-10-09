@@ -1,6 +1,6 @@
 agent_build packs a project folder into <folder name>.bot.
 
-Embedded: agent.md, agent.json, flow.md, skills/**, tools/doc/**, tools/bin/* (flat).
+Embedded: agent.md, agent.json, SQNC.md, skills/**, tools/doc/**, tools/bin/* (flat).
 Not embedded: tools/src, artifacts, hidden files, symlinks, anything else.
 
 Examples

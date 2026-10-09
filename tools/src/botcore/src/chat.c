@@ -667,6 +667,83 @@ static int run_tool_calls(chat_t *c, const cJSON *calls)
     return interrupted;
 }
 
+/* Remove leading <think>/<thinking>/<thought> blocks in place. */
+static void strip_thoughts(char *text)
+{
+    static const char *const tags[] = {"think", "thinking", "thought"};
+    for (int found = 1; text && found;) {
+        found = 0;
+        char *p = text + strspn(text, " \n\r\t");
+        for (size_t i = 0; i < 3 && !found; i++) {
+            char open[16], close[20];
+            snprintf(open, sizeof(open), "<%s>", tags[i]);
+            snprintf(close, sizeof(close), "</%s>", tags[i]);
+            if (strncmp(p, open, strlen(open)) == 0) {
+                char *end = strstr(p, close);
+                char *rest = end ? end + strlen(close) : p + strlen(p);
+                memmove(text, rest, strlen(rest) + 1);
+                found = 1;
+            }
+        }
+    }
+}
+
+int chat_ask(chat_t *c, const char *system, const char *question, int with_history, char **reply, char **err)
+{
+    http_resp_t r;
+    *reply = NULL;
+    *err = NULL;
+    char *url = url_for(c, "/chat/completions");
+    cJSON *root = cJSON_CreateObject();
+    cJSON *msgs = cJSON_AddArrayToObject(root, "messages");
+    cJSON_AddStringToObject(root, "model", c->model);
+    if (with_history) {
+        const cJSON *m;
+        cJSON_ArrayForEach(m, c->hist)
+        {
+            cJSON_AddItemToArray(msgs, cJSON_Duplicate(m, 1));
+        }
+    } else if (system && *system) {
+        add_msg(msgs, "system", system);
+    }
+    add_msg(msgs, "user", question);
+    char *body = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!url || !body) {
+        free(url);
+        free(body);
+        *err = strdup("out of memory");
+        return CHAT_ERR_OTHER;
+    }
+    int rc = http_request(url, c->key, body, CHAT_TIMEOUT_S, &r);
+    free(body);
+    free(url);
+    if (rc != HTTP_OK) {
+        int ret = transport_error(rc, &r, err);
+        http_resp_free(&r);
+        return ret;
+    }
+    if (r.status < 200 || r.status >= 300) {
+        *err = error_text(r.status, r.body);
+        int ret = (r.status == 401 || r.status == 403) ? CHAT_ERR_AUTH : CHAT_ERR_OTHER;
+        http_resp_free(&r);
+        return ret;
+    }
+    cJSON *j = cJSON_Parse(r.body);
+    http_resp_free(&r);
+    cJSON *msg = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(j, "choices"), 0),
+                                                  "message");
+    char *text = extract_content(cJSON_GetObjectItemCaseSensitive(msg, "content"));
+    cJSON_Delete(j);
+    if (!text) {
+        *err = strdup("unexpected response format (no message content)");
+        return CHAT_ERR_OTHER;
+    }
+    strip_thoughts(text);
+    *reply = text;
+    return CHAT_OK;
+}
+
 int chat_send(chat_t *c, const char *user, char **reply, char **err)
 {
     http_resp_t r;

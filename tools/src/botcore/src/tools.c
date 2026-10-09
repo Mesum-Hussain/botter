@@ -11,6 +11,13 @@ typedef struct {
     size_t        n;
 } table_t;
 
+static int g_review;
+
+void tools_enable_review(int on)
+{
+    g_review = on;
+}
+
 static table_t tables(int i)
 {
     switch (i) {
@@ -18,6 +25,7 @@ static table_t tables(int i)
     case 1: return (table_t){TOOLS_SHELL, TOOLS_SHELL_N};
     case 2: return (table_t){TOOLS_CRON, TOOLS_CRON_N};
     case 3: return (table_t){TOOLS_VFS, vfs_count() ? TOOLS_VFS_N : 0};
+    case 4: return (table_t){TOOLS_REVIEW, g_review ? TOOLS_REVIEW_N : 0};
     default: return (table_t){NULL, 0};
     }
 }

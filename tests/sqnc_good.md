@@ -1,7 +1,8 @@
 ---
-spec-version: "oml-2"
+spec-version: "sqnc-1"
 title: "Test Flow"
 ---
+```sqnc
 LOAD SKILL "pitching"
 ## STEP 1: GATHER
 1. ASK USER "Which folder?"
@@ -22,3 +23,4 @@ FOR EACH `f` IN `files` DO
     END IF
 END FOR
 RETURN "Read " + `files.length` + " files"
+```
