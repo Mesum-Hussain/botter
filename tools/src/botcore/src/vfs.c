@@ -44,6 +44,11 @@ const char *vfs_error(void)
     return g_err;
 }
 
+/* Patched by botter_pack in every .bot (see blob.h); all zero after the magic in plain botcore. */
+__attribute__((used, aligned(8))) static volatile const unsigned char g_packref[PACKREF_SIZE] = PACKREF_MAGIC;
+
+static char g_errbuf[200];
+
 static int fail(const char *why)
 {
     g_err = why;
@@ -60,20 +65,37 @@ int vfs_init(void)
         const char *p = (const char *)getauxval(AT_EXECFN);
         fd = p ? open(p, O_RDONLY | O_CLOEXEC) : -1;
     }
+    unsigned char ref[PACKREF_SIZE];
+    for (size_t i = 0; i < PACKREF_SIZE; i++) {
+        ref[i] = g_packref[i];
+    }
+    uint64_t want_size = rd64(ref + 16);
     if (fd < 0) {
-        return 0; /* cannot see ourselves: behave as "no pack" */
+        return want_size ? fail("cannot read this agent's own executable (/proc/self/exe)") : 0;
     }
     struct stat st;
     unsigned char ft[FOOTER_SIZE];
-    if (fstat(fd, &st) != 0 || st.st_size < FOOTER_SIZE ||
-        pread(fd, ft, FOOTER_SIZE, st.st_size - FOOTER_SIZE) != FOOTER_SIZE ||
-        memcmp(ft + 24, FOOTER_MAGIC, 8) != 0) {
+    int has_footer = fstat(fd, &st) == 0 && st.st_size >= FOOTER_SIZE &&
+                     pread(fd, ft, FOOTER_SIZE, st.st_size - FOOTER_SIZE) == FOOTER_SIZE &&
+                     memcmp(ft + 24, FOOTER_MAGIC, 8) == 0;
+    uint64_t fsz = (uint64_t)st.st_size;
+    if (want_size && fsz != want_size) {
+        close(fd);
+        snprintf(g_errbuf, sizeof(g_errbuf),
+                 "this agent file is %s: it should be %llu bytes but is %llu. Copy or download it again.",
+                 fsz < want_size ? "truncated" : "damaged", (unsigned long long)want_size, (unsigned long long)fsz);
+        return fail(g_errbuf);
+    }
+    if (!has_footer) {
         close(fd);
         return 0; /* plain botcore, no pack */
     }
     uint64_t boff = rd64(ft), blen = rd64(ft + 8);
     uint32_t crc = rd32(ft + 16);
-    uint64_t fsz = (uint64_t)st.st_size;
+    if (want_size && boff != rd64(ref + 8)) {
+        close(fd);
+        return fail("embedded agent pack does not match this executable (bad offset)");
+    }
     if (blen < BLOB_HEADER_SIZE || boff > fsz || blen > fsz - boff || boff + blen + FOOTER_SIZE != fsz) {
         close(fd);
         return fail("embedded agent pack is damaged (bad footer)");

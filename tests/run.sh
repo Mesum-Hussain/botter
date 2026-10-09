@@ -88,7 +88,7 @@ check "bad indentation reported" "$T/lint.log" "line 9: indentation must be a mu
 mkagent "$T/flow_nofence"
 printf '%s\n\n# Flow\n\nset x = 1\n' "$OML_HDR" >"$T/flow_nofence/flow.md"
 "$PACK" check "$T/flow_nofence" "$CORE" >"$T/lint.log" 2>&1
-check "unfenced flow.md warns about the fence" "$T/lint.log" "inside a \`\`\`python oml fenced block"
+check "unfenced flow.md warns about the fence" "$T/lint.log" "inside a \`\`\`oml fenced block"
 
 # ---------------------------------------------------------------------------
 section "Runtime: network modes, sandbox, system prompt (stub LLM)"
@@ -149,6 +149,24 @@ tool_call agent_build '{}'
 drive "$BOTTER" "$T/proj" BOTTER_TUI=0
 check "botter: agent_build builds a .bot from inside the sandbox" "$T/rec/tool.txt" "wrote .*proj\\.bot"
 [ -x "$T/proj/proj.bot" ] && pass "botter: the built agent is executable" || fail "botter: the built agent is executable"
+
+# ---------------------------------------------------------------------------
+section "Pack integrity"
+
+shell_call "echo intact"
+drive "$CORE" "$T/ws"
+check_not "plain botcore (no pack) still starts" "$T/out" "truncated|damaged"
+cp "$T/on.bot" "$T/trunc.bot" && truncate -s -100 "$T/trunc.bot"
+drive "$T/trunc.bot" "$T/ws"
+check "truncated .bot refuses to start with a clear message" "$T/out" "this agent file is truncated: it should be [0-9]+ bytes"
+cp "$T/on.bot" "$T/grown.bot" && printf 'junk' >>"$T/grown.bot"
+drive "$T/grown.bot" "$T/ws"
+check ".bot with extra bytes appended is reported as damaged" "$T/out" "this agent file is damaged"
+cp "$T/proj/proj.bot" "$T/trunc2.bot" && truncate -s -40 "$T/trunc2.bot"
+drive "$T/trunc2.bot" "$T/ws"
+check "agent built by botter (runtime taken from botter) detects truncation" "$T/out" "truncated"
+drive "$T/proj/proj.bot" "$T/ws"
+check "agent built by botter runs" "$T/out" "Connected"
 
 # ---------------------------------------------------------------------------
 section "HTTP client (local servers)"

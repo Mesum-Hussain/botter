@@ -28,6 +28,14 @@
  *   20  u32     reserved (0)
  *   24  char[8] "BOTPACK1"
  *
+ * PACK REFERENCE (inside the botcore ELF's data, 32 bytes):
+ *    0  char[8] "BOTPKREF"
+ *    8  u64     blob_off   0 in plain botcore
+ *   16  u64     file_size  total size of the .bot; 0 in plain botcore
+ *   24  u64     reserved
+ * botter_pack patches it in the copy it writes, so a .bot that lost its tail
+ * (interrupted copy/download) refuses to start instead of running as plain botcore.
+ *
  * The writer (botter_pack) is a separate program and carries its own copy of
  * this description. Keep both in sync; bump the magic digits on any change.
  */
@@ -38,5 +46,7 @@
 #define BLOB_ENTRY_SIZE   32
 #define FOOTER_SIZE       32
 #define BLOB_ALIGN        4096
+#define PACKREF_MAGIC     "BOTPKREF"
+#define PACKREF_SIZE      32
 
 #endif

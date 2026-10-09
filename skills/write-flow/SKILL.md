@@ -15,7 +15,7 @@ Every agent with more than one step gets a flow.md in the project root. A one-sh
 <!-- OML v1: Write workflows in plain English with 4-space indentation. Use `set name = value` for variables; `if`/`elif`/`else` for branches (`elif`/`else` attach to the nearest unfinished `if`); `for item in collection:` for iteration; `while condition:` for repetition; `in parallel:` for concurrent tasks; `retry N times:` for bounded retries; `ask user` for input/approval; `save state to "name"` for checkpoints; and `return value` to finish. Conditions and actions may be plain English. Structural keywords are `set`, `if`, `elif`, `else`, `for`, `in`, `while`, `return`; other directives are recognized as phrases. Only use manifest-declared capabilities. The runtime must enforce permissions, approvals, iteration/resource limits, and safe failure; never execute arbitrary code or guess ambiguous instructions. -->
 
 2. Then a markdown heading with the flow's name (`# Lead Outreach Flow`).
-3. Then the logic inside ONE fenced code block that starts with ```python oml and ends with ```. The fence keeps it pseudo code: without it, markdown merges lines into paragraphs and eats the indentation. "python" makes GitHub and editors syntax-highlight it (OML shares Python's keywords); "oml" marks it as OML for the build check and Botter's UI, which highlight it as OML. Nothing goes after the closing fence.
+3. Then the logic inside ONE fenced code block that starts with ```oml and ends with ```. The fence keeps it pseudo code: without it, markdown merges lines into paragraphs and eats the indentation. Botter's UI highlights OML. (```python oml is also accepted, if the user wants GitHub/editors to colour it like Python.) Nothing goes after the closing fence.
 4. Inside the fence: one statement per line, 4-space indentation, no tabs. A line ending in ':' opens a block; its body is indented exactly 4 more spaces.
 
 ## Statements
@@ -45,7 +45,7 @@ Every agent with more than one step gets a flow.md in the project root. A one-sh
 
 # Lead Outreach Flow
 
-```python oml
+```oml
 ask user what service they offer and who their clients are
 set service = the user's service
 set clients = the user's client type

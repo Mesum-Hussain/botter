@@ -15,7 +15,9 @@
  * Never embedded: tools/src, artifacts/, hidden files, symlinks, anything else.
  * Every tools/bin/<name> needs tools/doc/<name>.json (see botcore docs).
  *
- * Output format: botcore ELF + zero padding to 4096 + BLOB + FOOTER. The format
+ * Output format: botcore ELF + zero padding to 4096 + BLOB + FOOTER, with the
+ * ELF's 32-byte pack reference ("BOTPKREF", u64 blob_off, u64 file_size, u64 0)
+ * patched so botcore can detect a truncated .bot. The format
  * is defined by botcore (src/blob.h); this file carries its own copy of it.
  * Plain C11/POSIX, no dependencies.
  */
@@ -373,7 +375,7 @@ static void oml_lint(const char *s, size_t n)
         }
         p = e + 1;
     }
-    warn("flow.md: put the OML code inside a %s fenced block, or markdown will mangle its indentation", "```python oml");
+    warn("flow.md: put the OML code inside a %s fenced block, or markdown will mangle its indentation", "```oml");
     oml_lint_code(s, n, 0);
 }
 
@@ -640,6 +642,23 @@ static int cmd_build(const char *dir, const char *botcore, const char *out)
     put64(ft + 8, pos);
     put32(ft + 16, crc32_ieee(blob, (size_t)pos));
     memcpy(ft + 24, FOOTER_MAGIC, 8);
+
+    /* pack reference: exactly one "BOTPKREF" in the runtime */
+    unsigned char *ref = NULL;
+    int nref = 0;
+    for (size_t i = 0; i + 32 <= blen; i++) {
+        if (core[i] == 'B' && memcmp(core + i, "BOTPKREF", 8) == 0) {
+            ref = (unsigned char *)core + i;
+            nref++;
+        }
+    }
+    if (nref == 1) {
+        put64(ref + 8, base);
+        put64(ref + 16, base + pos + FOOTER_SIZE);
+        put64(ref + 24, 0);
+    } else {
+        warn("%s has no unique pack reference (older botcore?): a truncated .bot will not be detected", botcore);
+    }
 
     char tmp[4096];
     snprintf(tmp, sizeof(tmp), "%s.tmp.%d", out, (int)getpid());

@@ -1,6 +1,6 @@
 # BOTCORE + BOTTER: SPEC + STATUS (AI-consumed; terse by design)
 
-Updated: 2026-10-09 | Phase: tests in repo done (make test, 37 cases); next: detect truncated .bot | Lang: C11 | Target: x86_64 Linux, latest Fedora (dev: F44, kernel 7.2, SELinux enforcing, Landlock+userns on, musl-gcc)
+Updated: 2026-10-09 | Phase: truncated-.bot detection done; next: Ph6 release/size pass; OPEN: replace manifest.md (owner to decide) | Lang: C11 | Target: x86_64 Linux, latest Fedora (dev: F44, kernel 7.2, SELinux enforcing, Landlock+userns on, musl-gcc)
 Legend: [D]=owner decided, [R]=recommendation (unapproved), [S]=spike needed, P0..P3=priority
 
 ## 1. PRODUCT [D]
@@ -21,7 +21,7 @@ artifacts/            build inputs (cloned repos), never embedded
 Embedded: manifest.md agent.md agent.json flow.md skills/** tools/doc/** tools/bin/* (flat). Tool name [A-Za-z0-9_-]{1,64}, no built-in clash. Output named after folder.
 
 ## 3. BUILD + TOOLS [D, DONE]
-- `botter_pack build|check|list`. Format (authoritative src/blob.h, packer has a copy): `[botcore ELF][pad 4096][BLOB "BOTBLOB1" sorted entries][FOOTER 32B crc32 "BOTPACK1"]`. Loader reads /proc/self/exe footer, mmap RO; bad footer = refuse start.
+- `botter_pack build|check|list`. Format (authoritative src/blob.h, packer has a copy): `[botcore ELF][pad 4096][BLOB "BOTBLOB1" sorted entries][FOOTER 32B crc32 "BOTPACK1"]`. Loader reads /proc/self/exe footer, mmap RO; bad footer = refuse start. Pack reference (blob.h): 32B "BOTPKREF" + blob_off + file_size inside the botcore ELF data, patched by botter_pack per build; zero = plain botcore; size mismatch / missing footer with a patched ref -> "this agent file is truncated|damaged: it should be N bytes" (truncation inside the ELF itself still just crashes).
 - Errors: tool w/o descriptor, non-x86-64 ELF, bin neither ELF nor #!, bad name. Warnings: dynamic ELF, descriptor w/o bin, missing agent.md/manifest.md, OML lint.
 - Tool protocol: args = one JSON object on stdin (argv empty); stdout result; exit!=0 = error (stderr). Run from memfd+fexecve in sandbox child (setsid, cwd=ctx, rlimits, killpg on timeout/Ctrl-C, 32KB cap). fd 3 = agent's own exe (BOTCORE_RUNTIME_FD) so agent_build can use it as runtime.
 ### 3a. Network mode [D 2026-10-09]
@@ -29,7 +29,7 @@ Embedded: manifest.md agent.md agent.json flow.md skills/** tools/doc/** tools/b
 - `agent.json {"offline": true}` (invalid JSON => offline): children in empty netns (userns) else seccomp (blocks AF_INET/INET6/PACKET); guard denies curl/wget/pip/docker/git clone...; per-tool `"network": true` exception after startup y/N consent. Botter writes agent.json ONLY on explicit user request.
 - LLM calls are made by the botcore parent: never sandboxed, always work.
 ### 3b. flow.md / OML v1 [D 2026-10-09]
-- Owner-defined pseudo code (stand-in for LangGraph/n8n). File = verbatim `<!-- OML v1: ... -->` header (text in skills/write-flow) + `# Name` + ONE ```python oml fenced block (fence keeps indentation; "python" = highlighting on GitHub/editors; lint + TUI key on the word "oml", TUI has its own OML highlighter).
+- Owner-defined pseudo code (stand-in for LangGraph/n8n). File = verbatim `<!-- OML v1: ... -->` header (text in skills/write-flow) + `# Name` + ONE ```oml fenced block [D owner: ```oml, not ```python oml] (fence keeps indentation; lint + TUI key on the word "oml" so ```python oml also accepted; TUI has its own OML highlighter).
 - Followed by the LLM (no engine); botcore appends FLOW_HINT to system prompt when flow.md exists; guards still enforce approvals/limits.
 - botter_pack oml_lint (warnings, fenced body only): missing header/fence/unclosed fence, tabs, indent%4, ':' opener needs +4 body, unexpected indent, if/elif/else/for/while need ':', elif/else need unfinished if, `for x in y:`.
 
@@ -53,17 +53,18 @@ botcore `tools/src/botcore/src` (~4K LOC): http.c (in-process HTTP/1.1: plain fo
 Botter (repo root is an agent project): agent.md, flow.md, manifest.md, skills/{create-agent,project-layout,write-agent-md-and-skills,write-tool,write-flow,wrap-existing-project,build-agent}, tools agent_manifest/agent_build/agent_inspect (one static ELF `tools/src/agent_tools`, includes packer). Skills enforce: no mocks, agent's own LLM does reasoning (no call_llm tools), stdin-JSON tools with declared parameters, test tools by hand.
 TUI `tui/` (main.c, lay.c, tui.h, logo.h): `make` bundles botter-tui + artifacts/botter.bot (trailer "BOTTUI01"), runs agent from memfd with BOTCORE_FRONTEND=1; non-tty/TERM=dumb/BOTTER_TUI=0 -> plain REPL. Look: terminal's own bg (nothing painted); sage palette 5C7057/89A482/ACC5A6/D1EDD3 light/dark set via OSC 11 (else COLORFGBG, else dark; BOTTER_THEME overrides); Jupyter-like gutter `In [n]:`/`Out[n]:`, user msg = tinted bordered cell, chat box = next In cell; markdown/code/tables, collapsible thinking/tools (ctrl+o), scrollback, mouse wheel, paste, history. Logo 11x13 muted head + neck (no crown/limbs/body).
 Build: `make` -> ./botter; `make tools|artifacts|tui|clean`; botcore `make release` = static musl ~330KB (BearSSL ~58KB, CA anchors ~59KB, musl resolver; was 170KB with curl). BearSSL built as obj*/libbearssl.a with its own flags. Needs gcc + musl-gcc. After botcore changes re-run `make`.
-TESTS `make test` = tests/run.sh (temp dir, cleans up): stub_llm.py (OpenAI-compatible stub: tool/text/slow modes, free port, records system prompt + tool result), http_servers.py (origin: plain/chunked/POST echo; CONNECT proxy with Basic auth), http_client.c (http.c driver, built with musl). Cases: own project 0 warnings, OML lint (valid/missing ':'/indent/unfenced), tool loop, online/offline prompts + network, Landlock (ctx/tmp write, $HOME write/list denied), flow hint, no-PATH run, botter agent_build, HTTP plain/chunked/POST/407/bad URL/refused, Ctrl-C via tmux. BOTTER_TEST_NET=1 adds providers (Gemini/OpenAI/Groq/OpenRouter), badssl failures, HTTPS via proxy: 37/37 pass. Not covered: TUI rendering (checked manually via tmux captures), approved-path Landlock grant (needs y at a tty), real-LLM tool calling end to end.
+TESTS `make test` = tests/run.sh (temp dir, cleans up): stub_llm.py (OpenAI-compatible stub: tool/text/slow modes, free port, records system prompt + tool result), http_servers.py (origin: plain/chunked/POST echo; CONNECT proxy with Basic auth), http_client.c (http.c driver, built with musl). Cases: own project 0 warnings, pack integrity (plain botcore runs, truncated/appended .bot refused, botter-built agent), OML lint (valid/missing ':'/indent/unfenced), tool loop, online/offline prompts + network, Landlock (ctx/tmp write, $HOME write/list denied), flow hint, no-PATH run, botter agent_build, HTTP plain/chunked/POST/407/bad URL/refused, Ctrl-C via tmux. BOTTER_TEST_NET=1 adds providers (Gemini/OpenAI/Groq/OpenRouter), badssl failures, HTTPS via proxy: 37/37 pass. Not covered: TUI rendering (checked manually via tmux captures), approved-path Landlock grant (needs y at a tty), real-LLM tool calling end to end.
 
 ## 8. ISSUES
 Resolved I1 (Ph4): no host curl. Limits: TLS 1.2 only (BearSSL has no 1.3; all presets fine); IP-literal HTTPS hosts fail name check; DNS (getaddrinfo) not interruptible by Ctrl-C; corporate MITM CAs unsupported (no custom CA option yet).
 P1 I4 Classifier bypassable (`python -c`); hard layers cover fs (L3) and offline net (L5). An approved new-file path grants its existing parent (often $HOME) RW for that run.
-P2 memfd exec may be blocked by confined SELinux / vm.memfd_noexec (no fallback). Truncated .bot looks like plain botcore. Editor width = codepoints (CJK). Non-streaming.
+P2 memfd exec may be blocked by confined SELinux / vm.memfd_noexec (no fallback). Editor width = codepoints (CJK). Non-streaming.
 
 ## 9. PLAN / NEXT
 (0) Owner: build the hackathon agents with ./botter + real LLM (problem 2: marketing agent on google-maps-scraper-kit, must work e2e from 2 inputs, model-agnostic, no mocks, opt-out + send caps); tune skills from failures. First attempt (marketbot) failed: argv tools, mock LLM tool -> fixed in skills.
-(a) [NEXT] Detect truncated .bot (footer missing looks like plain botcore). (b) Ph6 release/size pass. Run `make test` after every change. Deferred: websearch tool, streaming, memory.
-Done: tests in repo (2026-10-09); Ph4 in-process HTTPS (2026-10-09; verified vs Gemini/OpenAI/OpenRouter/Groq, badssl failure cases, local chunked/POST/proxy/abort); Ph3d Landlock + rlimits + key hardening; Ph5a-e botter, TUI, network mode, flow.md.
+(a) [OPEN, owner decides] Drop manifest.md: botcore would build the skill/tool index from the pack (SKILL.md frontmatter + tools/doc/*.json) into the system prompt at startup; relations/notes live in flow.md; agent.json stays config-only; agent_manifest tool removed. Recommended over moving the map into agent.json (would duplicate sources and go stale).
+(b) [NEXT] Ph6 release/size pass. Run `make test` after every change. Deferred: websearch tool, streaming, memory.
+Done: truncated-.bot detection, tests in repo (2026-10-09); Ph4 in-process HTTPS (2026-10-09; verified vs Gemini/OpenAI/OpenRouter/Groq, badssl failure cases, local chunked/POST/proxy/abort); Ph3d Landlock + rlimits + key hardening; Ph5a-e botter, TUI, network mode, flow.md.
 
 ## 10. AGENT RULES
 - Prefer editing over new files; update THIS file each session, keep terse. Never log keys; no new persistence.
