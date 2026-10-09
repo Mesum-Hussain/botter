@@ -13,7 +13,8 @@ Only add a tool when file tools and shell commands are not enough.
 - The call arguments arrive on STDIN as one JSON object, e.g. {"city":"Oslo"}.
 - Print the result to STDOUT (plain text or JSON). Output beyond ~32KB is cut.
 - Exit code 0 = success. Non-zero = error: whatever you print to STDERR (else stdout) is shown to the LLM as the error. Write helpful messages.
-- It runs with the working directory = the agent's working directory, inside a sandbox with limited file size and CPU. It has the internet unless the agent is offline (see Network). Default timeout 60 s (descriptor timeout_s, max 600).
+- It runs with the working directory = the agent's working directory, inside a sandbox with limited file size, CPU, processes and memory. It has the internet unless the agent is offline (see Network).
+- Files (Landlock, where the kernel supports it): it may write only inside the working directory, /tmp, /var/tmp, ~/.cache and ~/.npm; it may read and run system directories and programs on $PATH. The rest of $HOME (~/.ssh, ~/.config, ...) is invisible: "Permission denied". Keep a tool's data and config in the working directory. Default timeout 60 s (descriptor timeout_s, max 600).
 - Command-line arguments ($1, sys.argv) are always EMPTY. A tool that reads argv instead of stdin JSON is broken. A tool that calls another of the agent's tools must pass it JSON on stdin too.
 - Never ship mock, placeholder or hard-coded results. Never write a tool that calls an LLM: the agent's own model does the reasoning.
 - Read stdin fully before answering. Do not prompt the user: stdin is not a terminal.

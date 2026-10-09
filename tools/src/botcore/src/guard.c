@@ -341,6 +341,30 @@ static int safe_special(const char *p)
 }
 
 /* Flag a word that names a path outside the context dir. */
+static char        g_grant[GUARD_MAX_GRANTS][PATH_MAX];
+static const char *g_grant_p[GUARD_MAX_GRANTS];
+static int         g_ngrant, g_priv;
+
+static void add_grant(const char *p)
+{
+    if (g_ngrant < GUARD_MAX_GRANTS) {
+        snprintf(g_grant[g_ngrant], PATH_MAX, "%s", p);
+        g_grant_p[g_ngrant] = g_grant[g_ngrant];
+        g_ngrant++;
+    }
+}
+
+int guard_shell_grants(const char *const **paths)
+{
+    *paths = g_grant_p;
+    return g_ngrant;
+}
+
+int guard_shell_priv(void)
+{
+    return g_priv;
+}
+
 static void check_path_word(const char *w, reasons_t *r)
 {
     char res[PATH_MAX];
@@ -348,6 +372,14 @@ static void check_path_word(const char *w, reasons_t *r)
 
     if (w[0] == '~') {
         add_why(r, "touches home/other path: %.80s", w);
+        const char *home = getenv("HOME");
+        if (home && *home && (w[1] == '\0' || w[1] == '/')) {
+            char ex[PATH_MAX];
+            snprintf(ex, sizeof(ex), "%s%s", home, w + 1);
+            if (guard_resolve(ex, res, &inside) == 0 && !inside) {
+                add_grant(res);
+            }
+        }
         return;
     }
     int dotdot = strcmp(w, "..") == 0 || strstr(w, "../") != NULL ||
@@ -362,6 +394,7 @@ static void check_path_word(const char *w, reasons_t *r)
         add_why(r, "cannot verify path: %.80s", w);
     } else if (!inside) {
         add_why(r, "path outside working dir: %.80s", res);
+        add_grant(res);
     }
 }
 
@@ -372,6 +405,8 @@ int guard_shell_classify(const char *cmd, char *why, size_t why_len)
     int deny = 0;
 
     why[0] = '\0';
+    g_ngrant = 0;
+    g_priv = 0;
     tokenize(cmd, &k);
     if (k.bad) {
         snprintf(why, why_len, "command could not be parsed safely (quotes/size)");
@@ -452,6 +487,7 @@ int guard_shell_classify(const char *cmd, char *why, size_t why_len)
 
         if (in_list(base, WRAPPERS) || in_list(base, PRIV)) {
             if (in_list(base, PRIV)) {
+                g_priv = 1;
                 add_why(&r, "privilege escalation (%s)", base);
             }
             /* the wrapped command is the next non-option, non-numeric, non-assignment word */

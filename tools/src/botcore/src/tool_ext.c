@@ -331,12 +331,10 @@ bool ext_run(const ext_tool_t *t, const cJSON *in, char *result, size_t rl)
         dup2(perr[1], 2);
         signal(SIGPIPE, SIG_DFL);
         signal(SIGINT, SIG_DFL);
-        if (chdir(guard_ctx()) != 0 || tool_sandbox_apply(timeout + 5, !guard_offline() || (t->network && g_net_allowed)) != 0) {
-            _exit(126);
-        }
         /* Hand the tool a read-only handle to this agent's own executable as fd 3
          * (BOTCORE_RUNTIME_FD=3): tools that build agents need the runtime, and a
-         * sandboxed child cannot open /proc/<parent>/exe itself. Best effort. */
+         * sandboxed child cannot open /proc/<parent>/exe itself. Opened before the
+         * sandbox: Landlock may hide the executable's directory. Best effort. */
         int rt = open("/proc/self/exe", O_RDONLY);
         if (rt >= 0) {
             if (rt != 3) {
@@ -344,6 +342,9 @@ bool ext_run(const ext_tool_t *t, const cJSON *in, char *result, size_t rl)
                 close(rt);
             }
             setenv("BOTCORE_RUNTIME_FD", "3", 1);
+        }
+        if (chdir(guard_ctx()) != 0 || tool_sandbox_apply(timeout + 5, !guard_offline() || (t->network && g_net_allowed)) != 0) {
+            _exit(126);
         }
         int fd = memfd_create(t->name, x->kind == VFS_EXEC_SCRIPT ? 0 : MFD_CLOEXEC);
         if (fd < 0) {

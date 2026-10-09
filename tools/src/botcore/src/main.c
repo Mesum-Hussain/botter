@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/prctl.h>
 
 typedef struct {
     const char *name;
@@ -321,6 +322,9 @@ int main(void)
 {
     chat_t chat;
 
+    /* Not dumpable: no core files, and other processes of this user cannot ptrace it or read
+     * /proc/<pid>/mem (the API key lives in RAM). */
+    prctl(PR_SET_DUMPABLE, 0, 0, 0, 0);
     term_init();
     guard_init();
     if (vfs_init() != 0) {
@@ -339,6 +343,7 @@ int main(void)
     int offline = agent_offline();
     guard_set_offline(offline);
     int isolation = offline ? tool_shell_probe() : NET_ISOLATION_NONE;
+    int landlock = tool_sandbox_probe();
 
     char net_names[512];
     size_t n_net = offline ? ext_network_tools(net_names, sizeof(net_names)) : 0;
@@ -405,6 +410,9 @@ int main(void)
 
     front_event("info", "model", chat.model, "cwd", cwd, (char *)NULL);
     puts(ANSI_BOLD_BLUE "Connected" ANSI_RESET);
+    if (!landlock) {
+        puts(ANSI_DIM "(note: Landlock unavailable; shell commands and tools are not confined to the working directory)" ANSI_RESET);
+    }
     if (offline && isolation == NET_ISOLATION_NONE) {
         puts(ANSI_DIM "(note: kernel network isolation unavailable; shell commands rely on the soft command filter only)" ANSI_RESET);
     }

@@ -44,4 +44,4 @@ fs_list, fs_read, fs_write (files in the working directory), shell_exec (sandbox
 - The agent is online by default: its shell and tools can reach the internet and localhost services.
 - With agent.json {"offline": true} it is offline except for the LLM connection: its shell and tools cannot reach the network (not even localhost services), except tools whose descriptor has "network": true, and only after the user allows it at startup.
 - For a completely offline agent, the user can also pick "Ollama (local)" as provider, so not even the LLM call leaves the machine.
-- It is free inside its working directory and asks the user before touching anything outside it or doing something destructive.
+- It is free inside its working directory and asks the user before touching anything outside it or doing something destructive. The kernel enforces this for shell commands and tools (Landlock): writes only in the working directory, /tmp and package caches; the rest of $HOME is hidden unless the user approves a command that names the path.

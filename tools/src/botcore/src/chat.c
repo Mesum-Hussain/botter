@@ -4,6 +4,7 @@
 #include "term.h"
 
 #include <stdio.h>
+#include <sys/mman.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -15,6 +16,9 @@ int chat_init(chat_t *c, const char *base, const char *key, const char *model)
     memset(c, 0, sizeof(*c));
     c->base = strdup(base);
     c->key = strdup(key ? key : "");
+    if (c->key) {
+        mlock(c->key, strlen(c->key) + 1); /* best effort: keep the key out of swap */
+    }
     c->model = strdup(model);
     c->hist = cJSON_CreateArray();
     if (!c->base || !c->key || !c->model || !c->hist) {
@@ -31,7 +35,9 @@ int chat_init(chat_t *c, const char *base, const char *key, const char *model)
 void chat_free(chat_t *c)
 {
     if (c->key) {
-        explicit_bzero(c->key, strlen(c->key));
+        size_t kl = strlen(c->key) + 1;
+        explicit_bzero(c->key, kl);
+        munlock(c->key, kl);
     }
     free(c->base);
     free(c->key);

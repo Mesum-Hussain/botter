@@ -48,4 +48,14 @@ int  guard_confirm_cat(int cat, const char *fmt, ...) __attribute__((format(prin
 #define SH_DENY     2  /* never run; `why` explains */
 int  guard_shell_classify(const char *cmd, char *why, size_t why_len);
 
+/*
+ * Set by the last guard_shell_classify: outside-ctx paths the command names
+ * (absolute, ~ expanded) and whether it escalates privileges (sudo, ...). Once
+ * the user approves the command, the Landlock sandbox grants those paths for
+ * that one run; an approved privileged command runs without Landlock.
+ */
+#define GUARD_MAX_GRANTS 16
+int  guard_shell_grants(const char *const **paths); /* count */
+int  guard_shell_priv(void);
+
 #endif

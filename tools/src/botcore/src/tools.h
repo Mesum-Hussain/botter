@@ -33,6 +33,10 @@ extern const size_t TOOLS_VFS_N;
 
 /* Child-side sandbox (after fork, before exec). net = keep host network. 0 ok, -1 refuse to run. */
 int    tool_sandbox_apply(int cpu_s, int net);
+/* Startup: Landlock ABI (0 = unavailable) and rlimit values for children. */
+int    tool_sandbox_probe(void);
+/* Parent, around fork(): approved paths for the next child; no_landlock for approved sudo. */
+void   tool_sandbox_grants(const char *const *paths, int n, int no_landlock);
 double tool_now_s(void);
 
 /* External tools = executables embedded in the agent pack (tool_ext.c). */

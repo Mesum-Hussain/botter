@@ -19,6 +19,7 @@ artifacts/ is never embedded. You read it, then copy or adapt what the agent nee
 - Prefer a few task-shaped tools (e.g. scrape_start, scrape_status, scrape_download) over one tool with dozens of flags. Expose only the parameters the agent needs; keep sane defaults from the repo.
 - Big results: write them to a file in the working directory (CSV/JSON) and return a short summary plus the path and a few preview rows. Tool output is cut at ~32KB.
 - Wrap the repo's real entry point with its real required arguments (read its usage line). No mock fallbacks.
+- The code runs sandboxed: it cannot read or write $HOME outside the working directory (only /tmp and ~/.cache are writable). Point any config, credentials file or output path the repo uses at the working directory (e.g. keep .env there).
 - Understanding, ranking and writing (e.g. reading a lead and inventing a pitch) is the agent's own LLM's job, guided by a skill. Do not hide it in a script.
 - Only if the agent is offline (agent.json) does a step that talks to a server, even on localhost, need "network": true in that tool's descriptor (read write-tool, section Network).
 - Runs longer than 10 minutes: split into start / status / download, and let the agent poll (or use cron_set to check back).

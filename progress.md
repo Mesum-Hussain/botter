@@ -1,6 +1,6 @@
 # BOTCORE + BOTTER: SPEC + STATUS (AI-consumed; terse by design)
 
-Updated: 2026-10-09 | Phase: 5e done; Ph3d in progress | Lang: C11 | Target: x86_64 Linux, latest Fedora (dev: F44, kernel 7.2, SELinux enforcing, Landlock+userns on, musl-gcc)
+Updated: 2026-10-09 | Phase: Ph3d done (Landlock, rlimits, key hardening); next Ph4 in-process HTTPS | Lang: C11 | Target: x86_64 Linux, latest Fedora (dev: F44, kernel 7.2, SELinux enforcing, Landlock+userns on, musl-gcc)
 Legend: [D]=owner decided, [R]=recommendation (unapproved), [S]=spike needed, P0..P3=priority
 
 ## 1. PRODUCT [D]
@@ -44,25 +44,27 @@ ZERO PERSISTENCE by runtime (no config/logs/cache; history RAM-only; only files 
 ## 6. SAFETY MODEL
 Free inside ctx (cwd at launch); ask y/N before outside-ctx access or destructive ops. LLM output untrusted.
 - L1 path guard (fs_*: realpath vs ctx) DONE. L2 shell classifier (soft) DONE: confirms rm/dd/kill/sudo/`sh -c`/`$()`/overwrites/outside paths/destructive git/git push; offline adds network-cmd deny.
-- L3 Landlock [Ph3d]. L4 rlimits CORE/FSIZE/CPU done, AS/NPROC [Ph3d]. L5 network isolation: offline agents only (§3a).
-- Key: RAM-only, never argv/env/disk; mlock + wipe [Ph3d].
+- L3 Landlock [DONE Ph3d] for every child (shell_exec + tools), all agents: RW ctx, /tmp, /var/tmp, /dev, ~/.cache, ~/.npm; RO+exec system dirs (/usr /etc /proc /sys /run /var /opt ...), $PATH dirs + their prefix if .../bin (not $HOME or /), ~/.gitconfig. Rest of $HOME hidden. Approved shell command naming outside paths -> those paths (or deepest existing parent) granted RW for that run only; approved sudo -> no Landlock that run. ABI probed (1..5 rights); unavailable -> dim note; apply failure -> refuse (fail closed). Needs no_new_privs (setuid can't elevate except approved-sudo runs). Runtime fd 3 opened before sandbox.
+- L4 rlimits: CORE 0, FSIZE 1GiB, CPU timeout+5, NPROC = user's procs at startup + 1024 (fork-bomb brake), DATA = physical RAM (chosen over AS: AS breaks V8/Go/WASM reservations). L5 network isolation: offline agents only (§3a).
+- Key: RAM-only, never argv/env/disk; mlock'd + explicit_bzero on free; process PR_SET_DUMPABLE 0 (no ptrace/proc mem by same user; netns child re-enables before unshare, else uid_map is root-owned).
 
 ## 7. CODE MAP
 botcore `tools/src/botcore/src` (~3.5K LOC): http.c (curl subprocess, key via stdin config), chat.c (validate, tool loop <=25 rounds, assistant msgs verbatim for Gemini thought_signature, turn-based trim at 300KB, reasoning events), term.c (line editor, SIGINT), main.c (connect flow, network mode, system prompt), tools.c (registry), guard.c (L1/L2, offline flag), tool_fs.c, tool_shell.c (shell_exec + tool_sandbox_apply), tool_ext.c, cron.c, vfs.c, front.c (BOTCORE_FRONTEND=1 JSON-record protocol for the TUI).
 Botter (repo root is an agent project): agent.md, flow.md, manifest.md, skills/{create-agent,project-layout,write-agent-md-and-skills,write-tool,write-flow,wrap-existing-project,build-agent}, tools agent_manifest/agent_build/agent_inspect (one static ELF `tools/src/agent_tools`, includes packer). Skills enforce: no mocks, agent's own LLM does reasoning (no call_llm tools), stdin-JSON tools with declared parameters, test tools by hand.
 TUI `tui/` (main.c, lay.c, tui.h, logo.h): `make` bundles botter-tui + artifacts/botter.bot (trailer "BOTTUI01"), runs agent from memfd with BOTCORE_FRONTEND=1; non-tty/TERM=dumb/BOTTER_TUI=0 -> plain REPL. Look: terminal's own bg (nothing painted); sage palette 5C7057/89A482/ACC5A6/D1EDD3 light/dark set via OSC 11 (else COLORFGBG, else dark; BOTTER_THEME overrides); Jupyter-like gutter `In [n]:`/`Out[n]:`, user msg = tinted bordered cell, chat box = next In cell; markdown/code/tables, collapsible thinking/tools (ctrl+o), scrollback, mouse wheel, paste, history. Logo 11x12 muted head (no crown/limbs/body).
 Build: `make` -> ./botter; `make tools|artifacts|tui|clean`; botcore `make release` = static musl ~170KB. Needs gcc + musl-gcc. After botcore changes re-run `make`.
-Tested with stub OpenAI servers (scratchpad only): chat, tools, network modes, OML lint, TUI captures via tmux. NOT tested: real-LLM tool calling end to end, real Gemini thoughts.
+Tested with stub OpenAI servers (scratchpad only): chat, tools, network modes, OML lint, TUI captures via tmux, Landlock (ctx/tmp write OK, $HOME write/list denied, ~/.local/bin tools run, approved path granted once, agent_build OK, offline netns+Landlock). NOT tested: real-LLM tool calling end to end, real Gemini thoughts.
 
 ## 8. ISSUES
 P0 I1 HTTP via host `curl` (not "any Linux"; key briefly in curl config) -> Ph4 in-process HTTPS (BearSSL, CA bundle in pack).
-P1 I4 Landlock, RLIMIT_AS/NPROC, key mlock/wipe (Ph3d). Classifier bypassable (`python -c`); hard layers cover only fs (L3) and offline net (L5).
+P1 I4 Classifier bypassable (`python -c`); hard layers cover fs (L3) and offline net (L5). An approved new-file path grants its existing parent (often $HOME) RW for that run.
 P2 memfd exec may be blocked by confined SELinux / vm.memfd_noexec (no fallback). Truncated .bot looks like plain botcore. Editor width = codepoints (CJK). Non-streaming.
 
 ## 9. PLAN / NEXT
 (0) Owner: build the hackathon agents with ./botter + real LLM (problem 2: marketing agent on google-maps-scraper-kit, must work e2e from 2 inputs, model-agnostic, no mocks, opt-out + send caps); tune skills from failures. First attempt (marketbot) failed: argv tools, mock LLM tool -> fixed in skills.
-(a) Ph3d [CURRENT]: Landlock fs sandbox for children + RLIMIT_AS/NPROC + key mlock/explicit_bzero.
-(b) Ph4: in-process HTTPS. (c) Tests in repo. (d) Detect truncated .bot. (e) Ph6 release/size pass. Deferred: websearch tool, streaming, memory.
+(a) Ph4 [NEXT]: in-process HTTPS (BearSSL static, minimal HTTP/1.1, CA bundle in pack) -> drop host curl.
+(b) Tests in repo. (c) Detect truncated .bot. (d) Ph6 release/size pass. Deferred: websearch tool, streaming, memory.
+Done: Ph3d Landlock + rlimits + key hardening (2026-10-09); Ph5a-e botter, TUI, network mode, flow.md.
 
 ## 10. AGENT RULES
 - Prefer editing over new files; update THIS file each session, keep terse. Never log keys; no new persistence.

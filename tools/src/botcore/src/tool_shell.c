@@ -3,6 +3,7 @@
 #include "term.h"
 #include "tools.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -19,6 +20,7 @@
 #include <sys/syscall.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <dirent.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -51,6 +53,9 @@ static int enter_empty_netns(void)
     uid_t u = geteuid();
     gid_t g = getegid();
 
+    /* botcore is not dumpable (key in RAM), which would make /proc/self/uid_map root-owned;
+     * this child is about to exec, which resets dumpability anyway. */
+    prctl(PR_SET_DUMPABLE, 1, 0, 0, 0);
     if (unshare(CLONE_NEWUSER | CLONE_NEWNET) != 0) {
         return -1;
     }
@@ -162,6 +167,190 @@ static int seccomp_blocks_inet(void)
     return fd < 0 && errno == EACCES ? 0 : -1;
 }
 
+/*
+ * L3: Landlock filesystem sandbox for children (kernel-enforced, unprivileged).
+ * Write: the working directory, /tmp, /var/tmp, /dev, ~/.cache, ~/.npm, plus
+ * paths the user approved for this one command. Read + execute: system
+ * directories, $PATH entries (and the prefix above a .../bin entry, e.g.
+ * ~/.local, but never $HOME or /), ~/.gitconfig. Everything else (the rest of
+ * $HOME: ~/.ssh, ~/.config tokens, ...) is invisible. ABI constants spelled out
+ * (musl has no linux/ headers); rights not known to the running kernel are dropped.
+ */
+#define NR_LANDLOCK_CREATE_RULESET 444
+#define NR_LANDLOCK_ADD_RULE       445
+#define NR_LANDLOCK_RESTRICT_SELF  446
+#define LL_CREATE_RULESET_VERSION  1u
+#define LL_RULE_PATH_BENEATH       1
+#define LL_EXECUTE     (1ull << 0)
+#define LL_WRITE_FILE  (1ull << 1)
+#define LL_READ_FILE   (1ull << 2)
+#define LL_READ_DIR    (1ull << 3)
+#define LL_REFER       (1ull << 13) /* ABI 2 */
+#define LL_TRUNCATE    (1ull << 14) /* ABI 3 */
+#define LL_IOCTL_DEV   (1ull << 15) /* ABI 5 */
+#define LL_FILE_RIGHTS (LL_EXECUTE | LL_WRITE_FILE | LL_READ_FILE | LL_TRUNCATE | LL_IOCTL_DEV)
+#define LL_RO          (LL_EXECUTE | LL_READ_FILE | LL_READ_DIR)
+
+struct ll_ruleset_attr {
+    uint64_t handled_access_fs;
+};
+struct ll_path_beneath {
+    uint64_t allowed_access;
+    int32_t  parent_fd;
+} __attribute__((packed));
+
+static int         g_ll_abi;      /* 0 = Landlock unavailable */
+static uint64_t    g_ll_all;      /* every fs right this kernel knows */
+static rlim_t      g_nproc, g_data;
+static const char *const *g_grants; /* set by shell_exec around fork() */
+static int         g_ngrants, g_no_landlock;
+
+static void ll_add(int rs, const char *path, uint64_t access)
+{
+    int fd = open(path, O_PATH | O_CLOEXEC);
+    if (fd < 0) {
+        return; /* missing paths are simply not granted */
+    }
+    struct stat st;
+    if (fstat(fd, &st) == 0 && !S_ISDIR(st.st_mode)) {
+        access &= LL_FILE_RIGHTS;
+    }
+    struct ll_path_beneath pb = {access & g_ll_all, fd};
+    syscall(NR_LANDLOCK_ADD_RULE, rs, LL_RULE_PATH_BENEATH, &pb, 0);
+    close(fd);
+}
+
+/* An approved path: grant it, or (if it does not exist yet) its deepest existing parent. */
+static void ll_add_grant(int rs, const char *path)
+{
+    char p[PATH_MAX];
+    snprintf(p, sizeof(p), "%s", path);
+    for (;;) {
+        if (access(p, F_OK) == 0 || strcmp(p, "/") == 0) {
+            break;
+        }
+        char *s = strrchr(p, '/');
+        if (!s) {
+            return;
+        }
+        if (s == p) {
+            s[1] = '\0';
+        } else {
+            *s = '\0';
+        }
+    }
+    if (strcmp(p, "/") != 0) {
+        ll_add(rs, p, g_ll_all);
+    }
+}
+
+static void ll_home(int rs, const char *home, const char *rel, uint64_t access)
+{
+    char p[PATH_MAX];
+    snprintf(p, sizeof(p), "%s/%s", home, rel);
+    ll_add(rs, p, access);
+}
+
+static int enter_landlock(void)
+{
+    struct ll_ruleset_attr ra = {g_ll_all};
+    int rs = (int)syscall(NR_LANDLOCK_CREATE_RULESET, &ra, sizeof(ra), 0);
+    if (rs < 0) {
+        return -1;
+    }
+    static const char *const ro[] = {"/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/etc",
+                                     "/opt", "/proc", "/sys", "/run", "/var", "/nix", "/snap", "/srv", NULL};
+    for (int i = 0; ro[i]; i++) {
+        ll_add(rs, ro[i], LL_RO);
+    }
+    static const char *const rw[] = {"/tmp", "/var/tmp", "/dev", NULL};
+    for (int i = 0; rw[i]; i++) {
+        ll_add(rs, rw[i], g_ll_all);
+    }
+    ll_add(rs, guard_ctx(), g_ll_all);
+    const char *home = getenv("HOME");
+    char hr[PATH_MAX] = "";
+    if (home && *home && realpath(home, hr)) {
+        ll_home(rs, hr, ".cache", g_ll_all);
+        ll_home(rs, hr, ".npm", g_ll_all);
+        ll_home(rs, hr, ".gitconfig", LL_READ_FILE);
+    }
+    const char *path = getenv("PATH");
+    char buf[4096];
+    snprintf(buf, sizeof(buf), "%s", path ? path : "");
+    for (char *save = NULL, *d = strtok_r(buf, ":", &save); d; d = strtok_r(NULL, ":", &save)) {
+        char r[PATH_MAX];
+        if (*d != '/' || !realpath(d, r)) {
+            continue;
+        }
+        ll_add(rs, r, LL_RO);
+        size_t n = strlen(r);
+        if (n > 4 && strcmp(r + n - 4, "/bin") == 0) {
+            r[n - 4] = '\0'; /* ~/.local/bin -> ~/.local (libs, site-packages) */
+            if (r[0] && strcmp(r, hr) != 0) {
+                ll_add(rs, r, LL_RO);
+            }
+        }
+    }
+    for (int i = 0; i < g_ngrants; i++) {
+        ll_add_grant(rs, g_grants[i]);
+    }
+    int ok = prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == 0 && syscall(NR_LANDLOCK_RESTRICT_SELF, rs, 0) == 0;
+    close(rs);
+    return ok ? 0 : -1;
+}
+
+void tool_sandbox_grants(const char *const *paths, int n, int no_landlock)
+{
+    g_grants = paths;
+    g_ngrants = n;
+    g_no_landlock = no_landlock;
+}
+
+/* Number of processes the user runs now (for a fork-bomb brake above it). */
+static long user_procs(void)
+{
+    DIR *d = opendir("/proc");
+    long n = 0;
+    struct dirent *e;
+    uid_t me = getuid();
+    while (d && (e = readdir(d))) {
+        struct stat st;
+        char p[300];
+        if (!isdigit((unsigned char)e->d_name[0])) {
+            continue;
+        }
+        snprintf(p, sizeof(p), "/proc/%s", e->d_name);
+        if (stat(p, &st) == 0 && st.st_uid == me) {
+            n++;
+        }
+    }
+    if (d) {
+        closedir(d);
+    }
+    return n;
+}
+
+int tool_sandbox_probe(void)
+{
+    long abi = syscall(NR_LANDLOCK_CREATE_RULESET, NULL, 0, LL_CREATE_RULESET_VERSION);
+    g_ll_abi = abi > 0 ? (int)abi : 0;
+    g_ll_all = g_ll_abi ? (1ull << 13) - 1 : 0; /* ABI 1: bits 0..12 */
+    if (g_ll_abi >= 2) {
+        g_ll_all |= LL_REFER;
+    }
+    if (g_ll_abi >= 3) {
+        g_ll_all |= LL_TRUNCATE;
+    }
+    if (g_ll_abi >= 5) {
+        g_ll_all |= LL_IOCTL_DEV;
+    }
+    g_nproc = (rlim_t)user_procs() + 1024;
+    long pages = sysconf(_SC_PHYS_PAGES), psz = sysconf(_SC_PAGESIZE);
+    g_data = pages > 0 && psz > 0 ? (rlim_t)pages * (rlim_t)psz : RLIM_INFINITY;
+    return g_ll_abi;
+}
+
 /* Probe once at startup: which kind of network isolation children get (NET_ISOLATION_*). */
 int tool_shell_probe(void)
 {
@@ -177,9 +366,11 @@ int tool_shell_probe(void)
 
 /*
  * Child-side sandbox shared by shell_exec and external tools: no core dumps,
- * file size and CPU rlimits, no network (L5: empty netns, else seccomp) unless
- * `net` (an online agent, or a "network" tool the user allowed in an offline one). Returns 0, or -1 if the isolation
- * the probe found could not be applied (fail closed).
+ * file size, CPU, process-count and heap rlimits; no network (L5: empty netns,
+ * else seccomp) unless `net` (an online agent, or a "network" tool the user
+ * allowed in an offline one); then the Landlock filesystem sandbox (L3) unless
+ * the user approved a privileged command. Returns 0, or -1 if an isolation the
+ * probes found could not be applied (fail closed).
  */
 int tool_sandbox_apply(int cpu_s, int net)
 {
@@ -189,12 +380,23 @@ int tool_sandbox_apply(int cpu_s, int net)
     setrlimit(RLIMIT_FSIZE, &fs);
     struct rlimit cpu = {(rlim_t)cpu_s, (rlim_t)cpu_s};
     setrlimit(RLIMIT_CPU, &cpu);
-    if (net) {
-        return 0;
+    struct rlimit cur;
+    if (g_nproc && getrlimit(RLIMIT_NPROC, &cur) == 0 && (cur.rlim_cur == RLIM_INFINITY || cur.rlim_cur > g_nproc)) {
+        struct rlimit np = {g_nproc, cur.rlim_max == RLIM_INFINITY || cur.rlim_max > g_nproc ? g_nproc : cur.rlim_max};
+        setrlimit(RLIMIT_NPROC, &np);
     }
-    if ((g_isolation == NET_ISOLATION_NETNS && enter_empty_netns() != 0) ||
-        (g_isolation == NET_ISOLATION_SECCOMP && enter_seccomp_offline() != 0)) {
+    if (g_data != RLIM_INFINITY) {
+        struct rlimit dl = {g_data, g_data};
+        setrlimit(RLIMIT_DATA, &dl);
+    }
+    if (!net && ((g_isolation == NET_ISOLATION_NETNS && enter_empty_netns() != 0) ||
+                 (g_isolation == NET_ISOLATION_SECCOMP && enter_seccomp_offline() != 0))) {
         const char m[] = "botcore: could not isolate network; refusing to run\n";
+        (void)!write(2, m, sizeof(m) - 1);
+        return -1;
+    }
+    if (g_ll_abi && !g_no_landlock && enter_landlock() != 0) {
+        const char m[] = "botcore: could not apply the Landlock filesystem sandbox; refusing to run\n";
         (void)!write(2, m, sizeof(m) - 1);
         return -1;
     }
@@ -246,8 +448,15 @@ static bool shell_exec(const cJSON *in, char *result, size_t rl)
         snprintf(result, rl, "pipe failed: %s", strerror(errno));
         return false;
     }
+    /* Paths the user just approved are writable for this run; approved sudo runs without Landlock. */
+    const char *const *grants = NULL;
+    int ngrants = cls == SH_CONFIRM ? guard_shell_grants(&grants) : 0;
+    tool_sandbox_grants(grants, ngrants, cls == SH_CONFIRM && guard_shell_priv());
     fflush(NULL);
     pid_t pid = fork();
+    if (pid != 0) {
+        tool_sandbox_grants(NULL, 0, 0); /* parent only: the child keeps them for its sandbox */
+    }
     if (pid < 0) {
         close(pfd[0]);
         close(pfd[1]);
@@ -363,7 +572,10 @@ static bool shell_exec(const cJSON *in, char *result, size_t rl)
 const tool_t TOOLS_SHELL[] = {
     {"shell_exec",
      "Run a shell command (/bin/sh -c) in the working directory and return its combined stdout+stderr "
-     "and exit code. Whether it has network access is stated in the system prompt. Destructive commands (rm, overwrite, "
+     "and exit code. Whether it has network access is stated in the system prompt. It can write only "
+     "inside the working directory, /tmp and package caches, and read system directories and $PATH tools; "
+     "other paths fail with 'Permission denied' unless the command names them (the user is then asked to "
+     "approve that path for this command). Destructive commands (rm, overwrite, "
      "git reset --hard, sudo, ...) and anything touching paths outside the working directory ask the "
      "user for approval first. Output is capped (~32KB). Default timeout 30s.",
      "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"},"
