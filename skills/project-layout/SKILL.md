@@ -10,7 +10,7 @@ The project root is the folder the user started botter in. The built file is nam
 ```
 <agent>/
   agent.md             persona and behaviour = the agent's system prompt
-  agent.json           the agent's metadata and settings (always write it; see "agent.json" below)
+  config.json          how to build and run the agent: name, version, internet, skills, tools ... (always write it; see "config.json" below)
   SQNC.md              OPTIONAL (recommended for multi-step agents): the session flow in Sqnc: frontmatter + UPPERCASE statements, checked by the build, run by botcore at start-up (see write-flow)
   skills/<name>/SKILL.md   task playbooks: how and when to use tools
   tools/                OPTIONAL
@@ -22,7 +22,7 @@ The project root is the folder the user started botter in. The built file is nam
 ```
 
 ## What is embedded in the .bot (read-only)
-agent.md, agent.json, SQNC.md, skills/** , tools/doc/** , tools/bin/* (flat, no sub-folders)
+agent.md, config.json, SQNC.md, skills/** , tools/doc/** , tools/bin/* (flat, no sub-folders); when config.json lists "skills" / "tools", only those
 
 ## What is NOT embedded
 tools/src, artifacts, hidden files (names starting with a dot), symlinks, everything else (README, .git, notes, test data).
@@ -41,44 +41,28 @@ fs_list, fs_read, fs_write (files in the working directory), shell_exec (sandbox
 ## Runtime facts the agent author should know
 - The agent connects to an OpenAI-compatible LLM endpoint chosen by the user at every start (provider, API key, model). Nothing is saved to disk: no config, no logs, no memory between runs.
 - The agent is online by default: its shell and tools can reach the internet and localhost services.
-- With agent.json {"offline": true} it is offline except for the LLM connection: its shell and tools cannot reach the network (not even localhost services), except tools whose descriptor has "network": true, and only after the user allows it at startup.
+- With config.json "internet": false it is offline except for the LLM connection: its shell and tools cannot reach the network (not even localhost services), except tools whose descriptor has "network": true, and only after the user allows it at startup.
 - For a completely offline agent, the user can also pick "Ollama (local)" as provider, so not even the LLM call leaves the machine.
 - It is free inside its working directory and asks the user before touching anything outside it or doing something destructive. The kernel enforces this for shell commands and tools (Landlock): writes only in the working directory, /tmp and package caches; the rest of $HOME is hidden unless the user approves a command that names the path.
 
-## agent.json
-The agent's manifest, like package.json: who it is, what it needs, how it runs, its settings. Every agent has one. The build checks it (bad JSON, wrong types or values are errors), the agent shows its name and version at start-up and with --version, and agent_inspect shows it all.
+## config.json
+How Botter builds and runs the agent. Every agent has one, and it holds only this (nothing about who made it or which LLM it uses: the person running the agent chooses the provider). The build checks it: bad JSON, wrong types, a bad name or version, or a listed skill or tool that does not exist are errors.
 
 {
   "name": "lead-outreach",
   "display_name": "Lead Outreach",
   "version": "0.1.0",
   "description": "Finds local businesses that need the user's service and pitches each one, with approval.",
-  "keywords": ["sales", "outreach"],
-  "author": "Jane Doe <jane@example.com>",
-  "license": "MIT",
-  "homepage": "https://github.com/jane/lead-outreach",
-  "repository": {"type": "git", "url": "https://github.com/jane/lead-outreach.git"},
-  "bugs": {"url": "https://github.com/jane/lead-outreach/issues"},
-  "engines": {"botcore": ">=0.1.0"},
-  "requires": ["python3"],
-  "llm": {"provider": "gemini", "model": "gemini-3.1-flash-lite", "temperature": 0.3, "max_tool_rounds": 25},
-  "mode": "build",
-  "autostart": true,
-  "config": {"city": "Lahore", "max_leads": 20}
+  "internet": true,
+  "skills": ["research-lead", "pitching"],
+  "tools": ["scrape_leads", "send_email"],
+  "requires": ["python3"]
 }
 
-Always write:
-- name: lowercase letters, digits, - _ . (1-64); the project folder's name. display_name: the spelling people see, if it differs.
-- version: MAJOR.MINOR.PATCH. A new agent starts at "0.1.0". When you change an existing agent, bump it before building: PATCH for fixes, MINOR for new abilities, MAJOR when it behaves differently for its users. Keep the other fields.
-- description: one sentence, what it does and for whom. keywords: a few words people would search for.
-- engines.botcore: ">=" + the botcore version the agent is built with (agent_build reports it); the agent refuses to start on an older runtime.
-- requires: every program the agent's tools or shell steps need on the machine (python3, node, git, ffmpeg ...). The build warns when a script tool's interpreter is missing from it; the agent warns at start-up when one is not installed.
-
-Only what the user tells you (never invent): author ("Name <email> (url)" or {"name", "email", "url"}), contributors, license, homepage, repository, bugs.
-
-Settings, only when needed:
-- llm: the provider (gemini, openai, openrouter, groq, ollama, custom + base_url) and model the agent is meant for (the user is offered them as defaults at start-up), temperature (0-2; lower = more predictable), max_tool_rounds (1-100, default 25). Never an API key: the user enters it at start-up.
-- config: the agent's adjustable settings (a city, limits, a tone, a folder name) instead of hard-coding them in skills or tools. The flow reads them as `config.city`; tools get the whole object as JSON in the environment variable AGENT_CONFIG; the model sees them too. NEVER secrets (keys, tokens, passwords): the build refuses them, because agent.json is inside the .bot for anyone to read. Tools that need a secret read it from an environment variable the user sets, and say so in agent.md.
-- mode: "plan" to start in read-only Plan mode (default "build").
-- autostart: false if SQNC.md should only run when the user types /run (default: it runs at start-up).
-- offline: true only when the user asks for an offline agent (see write-tool, section Network). builder: true is only for agents that build agents (Botter).
+- name: lowercase letters, digits, - _ . (1-64); the project folder's name. display_name: the spelling people see (shown at start-up).
+- version: MAJOR.MINOR.PATCH. A new agent starts at "0.1.0". When you change an existing agent, bump it before building: PATCH for fixes, MINOR for new abilities, MAJOR when it behaves differently for its users.
+- description: one sentence, what it does and for whom (shown at start-up; the agent knows it).
+- internet: false only when the user asks for an offline agent (see write-tool, section Network). Default true.
+- skills, tools: the skills (folder names) and tools (tools/bin names) compiled into the agent. List every one you wrote; a skill or tool left off the list stays in the folder but is not built in.
+- requires: every program the agent's tools or shell steps need on the machine (python3, node, git, ffmpeg ...). The build warns when a script tool's interpreter is missing from it; the agent says at start-up which ones are not installed.
+- builder: true only for agents that build agents (Botter itself).

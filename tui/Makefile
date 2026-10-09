@@ -7,7 +7,7 @@ STRIP_NOTES ?= -R .comment -R .note.gnu.property -R .annobin.notes -R .gnu.build
 CJSON  = ../tools/src/botcore/lib/cjson
 SRCS   = main.c lay.c $(CJSON)/cJSON.c
 HDRS   = tui.h logo.h
-VERSION ?= $(shell cat ../VERSION 2>/dev/null || echo dev)
+VERSION ?= $(shell sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' ../config.json 2>/dev/null)
 WARN   = -std=gnu11 -Wall -Wextra -Wno-unused-parameter -DBOTTER_VERSION='"$(VERSION)"'
 
 botter-tui: $(SRCS) $(HDRS)

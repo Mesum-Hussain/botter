@@ -16,7 +16,7 @@ const char *guard_ctx(void);
 
 /*
  * Network mode of this agent. Online (the default) leaves shell_exec and tools
- * on the host network; offline (agent.json {"offline": true}) blocks network
+ * on the host network; offline (config.json "internet": false) blocks network
  * commands here and cuts children off in the kernel (tool_sandbox_apply).
  * The LLM connection itself is made by botcore and is never affected.
  */

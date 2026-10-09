@@ -39,47 +39,33 @@ An agent is a folder of plain-text files. Botter writes them with you, and you c
 | `SQNC.md` | The session, step by step, in **Sqnc** | Anyone (structured English) |
 | `skills/<name>/SKILL.md` | Playbooks: how to do one task well | Anyone (English) |
 | `tools/bin/<name>` + `tools/doc/<name>.json` | Small programs the agent can run, and their description | A little code |
-| `agent.json` | Name, version, description, author, license, homepage, and settings such as `"offline": true` | Botter (you can edit it) |
+| `config.json` | How Botter builds and runs it: name, version, internet on/off, which skills and tools go in | Botter (you can edit it) |
 
-### agent.json: the manifest
+### config.json: how the agent is built
 
-Like `package.json`, but for an agent: who it is, what it needs, how it runs, and its settings.
+Botter's build settings for the agent, and nothing else:
 
 ```json
 {
   "name": "lead-outreach",
   "display_name": "Lead Outreach",
-  "version": "1.2.0",
+  "version": "0.1.0",
   "description": "Finds local businesses that need your service and pitches each one, with your approval.",
-  "keywords": ["sales", "outreach"],
-  "author": "Jane Doe <jane@example.com>",
-  "license": "MIT",
-  "homepage": "https://github.com/jane/lead-outreach",
-  "repository": {"type": "git", "url": "https://github.com/jane/lead-outreach.git"},
-  "bugs": {"url": "https://github.com/jane/lead-outreach/issues"},
-
-  "engines": {"botcore": ">=0.1.0"},
-  "requires": ["python3"],
-
-  "llm": {"provider": "gemini", "model": "gemini-3.1-flash-lite", "temperature": 0.3, "max_tool_rounds": 25},
-  "mode": "build",
-  "autostart": true,
-  "offline": false,
-
-  "config": {"city": "Lahore", "max_leads": 20}
+  "internet": true,
+  "skills": ["research-lead", "pitching"],
+  "tools": ["scrape_leads", "send_email"],
+  "requires": ["python3"]
 }
 ```
 
 | Field | What it does |
 |---|---|
-| `name`, `display_name`, `version`, `description`, `keywords`, `author`, `contributors`, `license`, `homepage`, `repository`, `bugs` | The package. Shown at start-up, with `--version`, by `botter_pack list` and `agent_inspect`, and the agent knows it if asked. `version` is semver; Botter bumps it on every change. |
-| `engines.botcore` | A semver range (`>=0.1.0`, `^1.2.0`). The build checks it against the runtime it packs; an agent won't start on a botcore that doesn't match. |
-| `requires` | Programs the agent needs (`python3`, `git`). The build warns when a script tool's interpreter is missing from the list; the agent says at start-up which ones aren't installed. |
-| `llm` | The provider and model the agent is meant for (offered as the defaults when connecting), `temperature`, `max_tool_rounds`. Never a key: the build refuses one. |
-| `mode`, `autostart`, `offline` | Start in Build or Plan mode, run `SQNC.md` at start-up or only on `/run`, and cut the agent's tools off from the network. |
-| `config` | The agent's adjustable settings, instead of values hard-coded in skills or tools. The flow reads `` `config.city` `` (the build checks the field exists), tools get it all as `$AGENT_CONFIG`, and the model sees it too. Anything that looks like a secret is refused: agent.json ships inside the `.bot`. |
+| `name`, `display_name`, `version`, `description` | Who the agent is. Shown when it starts and with `--version`, and the agent knows it if asked. Botter starts a new agent at `0.1.0` and bumps the version whenever it changes one. |
+| `internet` | `false` builds an offline agent: the kernel cuts its tools and shell commands off the network (the connection to the LLM still works). |
+| `skills`, `tools` | Which skills and tools are compiled in. A listed one that doesn't exist is a build error; one that is present but not listed is left out, with a warning. |
+| `requires` | Programs the tools need on the machine (`python3`, `git`). The build warns when a script tool's interpreter isn't listed; the agent says at start-up which ones aren't installed. |
 
-The build validates all of it: bad JSON, wrong types, a bad name, version or range, secrets and unknown providers are errors; unknown keys and missing basics are warnings.
+The LLM provider, model and key aren't in it: whoever runs the agent chooses those. The build checks the file: bad JSON, wrong types, a bad name or version, or a missing skill or tool are errors.
 
 ### Skills: how to do a task
 
@@ -210,7 +196,7 @@ The reference rows are the bare interpreters, before any agent framework is even
 ## Private by design
 
 - **Stateless.** Botter and the agents it builds write nothing on their own: no config files, no logs, no history, no cache. The conversation lives in RAM and is gone when you quit, and Botter's screen is cleared on exit. The only files that appear are the ones you asked the agent to make.
-- **Nothing phones home.** No telemetry, no accounts, no update checks. The only connection botcore makes is to the LLM provider *you* chose, with *your* key (BYOK). Tools and shell commands may use the network when the task needs it; mark an agent `{"offline": true}` and the kernel cuts them off.
+- **Nothing phones home.** No telemetry, no accounts, no update checks. The only connection botcore makes is to the LLM provider *you* chose, with *your* key (BYOK). Tools and shell commands may use the network when the task needs it; set `"internet": false` in an agent's config.json and the kernel cuts them off.
 - **Your key stays in memory.** It is never written to disk, never passed in arguments or environment, held in locked memory and wiped on exit, and other programs of your user cannot read the process. So you don't retype it every run, it is cached in the kernel keyring until reboot (RAM only; `/forget` clears it, `BOTCORE_NO_KEYRING=1` disables it). Shell commands and tools cannot reach that keyring.
 
 ## Safe by default
@@ -229,7 +215,7 @@ The reference rows are the bare interpreters, before any agent framework is even
 ## Development
 
 ```sh
-make test                     # 120 tests: Sqnc compiler + interpreter + review, agent.json, sandbox, streaming, key cache, Plan mode, HTTP, TUI
+make test                     # 111 tests: Sqnc compiler + interpreter + review, config.json, sandbox, streaming, key cache, Plan mode, HTTP, TUI
 BOTTER_TEST_NET=1 make test   # adds real providers and TLS failure cases
 make dist                     # dist/botter-<version>-linux-x86_64.tar.gz + .sha256
 ```

@@ -6,10 +6,10 @@
  *   botter_pack list  <file.bot>
  *
  * Embeds (read-only) from <agent-dir>:
- *   agent.md, agent.json, SQNC.md, skills/, tools/doc/ (recursive)   plain files
+ *   agent.md, config.json, SQNC.md, skills/, tools/doc/ (recursive)   plain files
  *       (SQNC.md is optional: the session flow in Sqnc, checked by botcore/src/sqnc.c; errors stop the build)
- *       (agent.json: the agent's metadata and settings, validated by check_agent_json:
- *        name, version (semver), description, author, license, homepage, offline, builder)
+ *       (config.json: how to build and run the agent, read by load_config/check_config:
+ *        name, display_name, version, description, internet, skills, tools, requires, builder)
  *   tools/bin/<name>                                 tool executables: either a
  *       native ELF x86-64 binary (any language that compiles to one) or a script
  *       starting with "#!" (interpreter must exist on the machine running the agent).
@@ -36,7 +36,6 @@
 #include <unistd.h>
 
 #include "cJSON.h"
-#include "../botcore/src/semver.h"
 
 #define BLOB_MAGIC       "BOTBLOB1"
 #define FOOTER_MAGIC     "BOTPACK1"
@@ -59,6 +58,7 @@ typedef struct {
 static item_t *items;
 static size_t  n_items, cap_items;
 static int     errors, warnings;
+static cJSON  *g_cfg; /* the project's config.json (NULL if absent or invalid) */
 
 static void die(const char *msg)
 {
@@ -341,32 +341,12 @@ static int sqnc_has_tool(const char *name)
             return 1;
         }
     }
-    if (strcmp(name, "sqnc_review") == 0) { /* only for builder agents: agent.json {"builder": true} */
-        for (size_t i = 0; i < n_items; i++) {
-            if (strcmp(items[i].path, "agent.json") == 0 && items[i].data) {
-                const char *b = strstr(items[i].data, "\"builder\"");
-                return b && strncmp(b + 9 + strspn(b + 9, " :\t"), "true", 4) == 0;
-            }
-        }
-        return 0;
+    if (strcmp(name, "sqnc_review") == 0) { /* only for agents that build agents: config.json "builder" */
+        return cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(g_cfg, "builder"));
     }
     char p[300];
     snprintf(p, sizeof(p), "tools/bin/%s", name);
     return has_item(p);
-}
-
-/* `config.field` in SQNC.md: agent.json "config" must have that field. */
-static int sqnc_has_config(const char *field)
-{
-    for (size_t i = 0; i < n_items; i++) {
-        if (strcmp(items[i].path, "agent.json") == 0 && items[i].data) {
-            cJSON *j = cJSON_ParseWithLength(items[i].data, items[i].len);
-            int has = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(j, "config"), field) != NULL;
-            cJSON_Delete(j);
-            return has;
-        }
-    }
-    return 0;
 }
 
 static int sqnc_has_skill(const char *name)
@@ -376,7 +356,9 @@ static int sqnc_has_skill(const char *name)
     return has_item(p);
 }
 
-static int agent_name_ok(const char *n)
+static char g_core_version[32]; /* the runtime's BOTCORE_VERSION tag, "" if unknown */
+
+static int name_ok(const char *n)
 {
     size_t l = strlen(n);
     if (l == 0 || l > 64 || !(islower((unsigned char)n[0]) || isdigit((unsigned char)n[0]))) {
@@ -390,225 +372,241 @@ static int agent_name_ok(const char *n)
     return 1;
 }
 
-static int url_ok(const char *u)
+/* MAJOR.MINOR.PATCH, numbers without leading zeros, optional -pre / +build. */
+static int version_ok(const char *v)
 {
-    return strncmp(u, "https://", 8) == 0 || strncmp(u, "http://", 7) == 0;
+    for (int part = 0; part < 3; part++) {
+        if (!isdigit((unsigned char)*v) || (v[0] == '0' && isdigit((unsigned char)v[1]))) {
+            return 0;
+        }
+        while (isdigit((unsigned char)*v)) {
+            v++;
+        }
+        if (part < 2 && *v++ != '.') {
+            return 0;
+        }
+    }
+    if (*v == '-' || *v == '+') {
+        for (v++; *v; v++) {
+            if (!isalnum((unsigned char)*v) && !strchr(".-+", *v)) {
+                return 0;
+            }
+        }
+    }
+    return *v == '\0';
 }
 
-static void aj_err(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
-static void aj_err(const char *fmt, ...)
+static void cfg_err(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static void cfg_err(const char *fmt, ...)
 {
     char m[400];
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(m, sizeof(m), fmt, ap);
     va_end(ap);
-    err("agent.json: %s%s", m, NULL);
+    err("config.json: %s%s", m, NULL);
 }
 
-static void aj_warn(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
-static void aj_warn(const char *fmt, ...)
+static void cfg_warn(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static void cfg_warn(const char *fmt, ...)
 {
     char m[400];
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(m, sizeof(m), fmt, ap);
     va_end(ap);
-    warn("agent.json: %s", m);
+    warn("config.json: %s", m);
 }
 
-/* A person: "Name <email> (url)" or {"name", "email", "url"}. */
-static void aj_person(const cJSON *p, const char *what)
+/* A list of names ("skills", "tools", "requires"): 1 if valid (or absent). */
+static int cfg_list_ok(const char *key, int (*valid)(const char *))
 {
-    if (cJSON_IsString(p)) {
-        return;
+    const cJSON *l = cJSON_GetObjectItemCaseSensitive(g_cfg, key), *e;
+    if (!l) {
+        return 1;
     }
-    if (!cJSON_IsObject(p) || !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(p, "name"))) {
-        aj_err("%s must be \"Name <email> (url)\" or {\"name\": ..., \"email\": ..., \"url\": ...}", what);
-        return;
+    int ok = cJSON_IsArray(l);
+    cJSON_ArrayForEach(e, (ok ? l : NULL))
+    {
+        ok &= cJSON_IsString(e) && valid(e->valuestring);
     }
-    const cJSON *u = cJSON_GetObjectItemCaseSensitive(p, "url");
-    if (u && (!cJSON_IsString(u) || !url_ok(u->valuestring))) {
-        aj_err("%s.url must be an http(s):// URL", what);
+    if (!ok) {
+        cfg_err("\"%s\" must be a list of names", key);
     }
+    return ok;
 }
 
-/* config must not hold secrets: it is embedded in the .bot, readable by anyone who has the file. */
-static void aj_secrets(const cJSON *o, const char *path)
+static int cmd_name_ok(const char *c)
 {
-    static const char *const bad[] = {"key", "token", "secret", "password", "passwd", "credential", "private", NULL};
-    for (const cJSON *f = o ? o->child : NULL; f; f = f->next) {
-        char p[200];
-        snprintf(p, sizeof(p), "%s.%s", path, f->string ? f->string : "?");
-        if (f->string && cJSON_IsString(f) && f->valuestring[0]) {
-            char low[100];
-            size_t i = 0;
-            for (; f->string[i] && i < sizeof(low) - 1; i++) {
-                low[i] = (char)tolower((unsigned char)f->string[i]);
-            }
-            low[i] = '\0';
-            for (int k = 0; bad[k]; k++) {
-                if (strstr(low, bad[k])) {
-                    aj_err("%s looks like a secret; never put secrets in agent.json (it is embedded in the .bot "
-                           "for anyone to read). Have the tool read it from the environment or ask the user",
-                           p);
-                    break;
-                }
-            }
-        }
-        if (cJSON_IsObject(f)) {
-            aj_secrets(f, p);
+    return *c && !strpbrk(c, " /;|&$`'\"\t");
+}
+
+static int tool_name_ok(const char *c)
+{
+    return *c && strlen(c) <= 64 && strspn(c, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") == strlen(c);
+}
+
+static int in_cfg_list(const char *key, const char *name)
+{
+    const cJSON *e;
+    cJSON_ArrayForEach(e, cJSON_GetObjectItemCaseSensitive(g_cfg, key))
+    {
+        if (cJSON_IsString(e) && !strcmp(e->valuestring, name)) {
+            return 1;
         }
     }
+    return 0;
 }
 
 /*
- * agent.json: the agent's manifest, like package.json.
- *   package:  name, display_name, version, description, keywords, author, contributors, license, homepage, repository, bugs
- *   needs:    engines {"botcore": ">=0.1.0"}, requires ["python3", "git"] (commands on PATH)
- *   llm:      {"provider", "model", "base_url", "temperature", "max_tool_rounds"} (defaults, not secrets)
- *   runtime:  offline, mode ("build" | "plan"), autostart (run SQNC.md at start), builder
- *   config:   free-form settings for the flow (`config`) and tools ($AGENT_CONFIG); no secrets
- * Bad JSON, wrong types or values are errors; unknown keys and a missing name/version/description warnings.
+ * config.json: how to build and run the agent.
+ *   {"name": "lead-outreach", "display_name": "Lead Outreach", "version": "0.1.0",
+ *    "description": "...", "internet": true, "skills": [...], "tools": [...],
+ *    "requires": ["python3"], "builder": false}
+ * Read before the files are collected: "skills" / "tools" choose what is compiled in.
  */
-static char g_core_version[32]; /* the runtime's BOTCORE_VERSION tag, "" if unknown */
-
-static void check_agent_json(void)
+static void load_config(const char *dir)
 {
-    const item_t *it = NULL;
-    for (size_t i = 0; i < n_items; i++) {
-        if (strcmp(items[i].path, "agent.json") == 0) {
-            it = &items[i];
-        }
+    char *old = join(dir, "agent.json");
+    if (access(old, F_OK) == 0) {
+        err("%s: agent.json is now config.json; rename it (see the project-layout skill for its fields)%s", old, NULL);
     }
-    if (!it || !it->data) {
-        warn("no agent.json: add one with the agent's %s (see the project-layout skill)", "name, version and description");
+    free(old);
+    char *f = join(dir, "config.json");
+    size_t n = 0;
+    char *d = access(f, F_OK) == 0 ? slurp(f, &n) : NULL;
+    free(f);
+    if (!d) {
+        warn("no config.json: add one with the agent's %s (see the project-layout skill)", "name, version and description");
         return;
     }
-    cJSON *j = cJSON_ParseWithLength(it->data, it->len);
-    if (!cJSON_IsObject(j)) {
-        err("agent.json is not a valid JSON object%s%s", j ? "" : " (syntax error)", NULL);
-        cJSON_Delete(j);
+    g_cfg = cJSON_ParseWithLength(d, n);
+    free(d);
+    if (!cJSON_IsObject(g_cfg)) {
+        err("config.json is not a valid JSON object%s%s", g_cfg ? "" : " (syntax error)", NULL);
+        cJSON_Delete(g_cfg);
+        g_cfg = NULL;
         return;
     }
-    static const char *const strs[] = {"name", "display_name", "version", "description", "license", "homepage", NULL};
-    static const char *const bools[] = {"offline", "builder", "autostart", NULL};
-    static const char *const other[] = {"keywords", "author", "contributors", "repository", "bugs", "engines",
-                                        "requires", "llm", "mode", "config", NULL};
-    for (const cJSON *f = j->child; f; f = f->next) {
+    static const char *const strs[] = {"name", "display_name", "version", "description", NULL};
+    static const char *const bools[] = {"internet", "builder", NULL};
+    static const char *const lists[] = {"skills", "tools", "requires", NULL};
+    for (const cJSON *x = g_cfg->child; x; x = x->next) {
         int known = 0;
         for (int k = 0; strs[k]; k++) {
-            if (!strcmp(f->string, strs[k])) {
+            if (!strcmp(x->string, strs[k])) {
                 known = 1;
-                if (!cJSON_IsString(f)) {
-                    aj_err("\"%s\" must be a string", f->string);
+                if (!cJSON_IsString(x)) {
+                    cfg_err("\"%s\" must be a string", x->string);
                 }
             }
         }
         for (int k = 0; bools[k]; k++) {
-            if (!strcmp(f->string, bools[k])) {
+            if (!strcmp(x->string, bools[k])) {
                 known = 1;
-                if (!cJSON_IsBool(f)) {
-                    aj_err("\"%s\" must be true or false", f->string);
+                if (!cJSON_IsBool(x)) {
+                    cfg_err("\"%s\" must be true or false", x->string);
                 }
             }
         }
-        for (int k = 0; other[k]; k++) {
-            known |= !strcmp(f->string, other[k]);
+        for (int k = 0; lists[k]; k++) {
+            known |= !strcmp(x->string, lists[k]);
         }
         if (!known) {
-            aj_warn("unknown key \"%.60s\" (see the project-layout skill for the fields)", f->string);
+            cfg_warn("unknown key \"%.60s\" (known: name, display_name, version, description, internet, skills, tools, "
+                     "requires, builder)", x->string);
         }
     }
-#define FIELD(k) cJSON_GetObjectItemCaseSensitive(j, k)
-    const cJSON *n = FIELD("name"), *v = FIELD("version"), *h = FIELD("homepage"), *d = FIELD("description");
-    if (!n) {
-        aj_warn("no \"name\" (%s)", "lowercase letters, digits, - _ .; usually the folder name");
-    } else if (cJSON_IsString(n) && !agent_name_ok(n->valuestring)) {
-        aj_err("name \"%s\" must be 1-64 lowercase letters, digits, - _ . (starting with a letter or digit); put "
-               "the spelling people see in \"display_name\"", n->valuestring);
+    const cJSON *nm = cJSON_GetObjectItemCaseSensitive(g_cfg, "name");
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(g_cfg, "version");
+    const cJSON *ds = cJSON_GetObjectItemCaseSensitive(g_cfg, "description");
+    if (!nm) {
+        cfg_warn("no \"name\" (%s)", "lowercase letters, digits, - _ .; usually the folder name");
+    } else if (cJSON_IsString(nm) && !name_ok(nm->valuestring)) {
+        cfg_err("name \"%s\" must be 1-64 lowercase letters, digits, - _ . (starting with a letter or digit); put the "
+                "spelling people see in \"display_name\"", nm->valuestring);
     }
     if (!v) {
-        aj_warn("no \"version\" (%s)", "semantic versioning, e.g. \"0.1.0\"");
-    } else if (cJSON_IsString(v) && !sv_valid(v->valuestring)) {
-        aj_err("version \"%s\" is not a semantic version like 1.0.0 (MAJOR.MINOR.PATCH)", v->valuestring);
+        cfg_warn("no \"version\" (%s)", "MAJOR.MINOR.PATCH, e.g. \"0.1.0\"");
+    } else if (cJSON_IsString(v) && !version_ok(v->valuestring)) {
+        cfg_err("version \"%s\" is not MAJOR.MINOR.PATCH (e.g. 1.0.0)", v->valuestring);
     }
-    if (!d) {
-        aj_warn("no \"description\" (%s)", "one sentence: what the agent does and for whom");
-    } else if (cJSON_IsString(d) && strlen(d->valuestring) > 300) {
-        aj_warn("keep the description to one or two sentences (%s)", "300 characters");
+    if (!ds) {
+        cfg_warn("no \"description\" (%s)", "one sentence: what the agent does and for whom");
+    } else if (cJSON_IsString(ds) && strlen(ds->valuestring) > 300) {
+        cfg_warn("keep the description to one or two sentences (%s)", "300 characters");
     }
-    if (cJSON_IsString(h) && *h->valuestring && !url_ok(h->valuestring)) {
-        aj_err("homepage \"%s\" must be an http(s):// URL", h->valuestring);
-    }
-    const cJSON *kw = FIELD("keywords"), *e;
-    if (kw) {
-        int bad = !cJSON_IsArray(kw) || cJSON_GetArraySize(kw) > 20;
-        cJSON_ArrayForEach(e, kw)
-        {
-            bad |= !cJSON_IsString(e);
+    cfg_list_ok("skills", tool_name_ok);
+    cfg_list_ok("tools", tool_name_ok);
+    cfg_list_ok("requires", cmd_name_ok);
+}
+
+/*
+ * After the files are collected: "skills" / "tools" (when given) decide which are
+ * compiled in; listed ones must exist, unlisted ones are left out with a warning.
+ */
+static void select_from_config(void)
+{
+    const cJSON *sk = cJSON_GetObjectItemCaseSensitive(g_cfg, "skills");
+    const cJSON *tl = cJSON_GetObjectItemCaseSensitive(g_cfg, "tools");
+    char seen[1024] = "";
+    size_t w = 0;
+    for (size_t i = 0; i < n_items; i++) {
+        const char *p = items[i].path;
+        char nm[200] = "";
+        const char *key = NULL;
+        if (cJSON_IsArray(sk) && !strncmp(p, "skills/", 7)) {
+            snprintf(nm, sizeof(nm), "%.*s", (int)strcspn(p + 7, "/"), p + 7);
+            key = "skills";
+        } else if (cJSON_IsArray(tl) && !strncmp(p, "tools/bin/", 10)) {
+            snprintf(nm, sizeof(nm), "%s", p + 10);
+            key = "tools";
+        } else if (cJSON_IsArray(tl) && !strncmp(p, "tools/doc/", 10)) {
+            snprintf(nm, sizeof(nm), "%.*s", (int)strcspn(p + 10, "."), p + 10);
+            key = "tools";
         }
-        if (bad) {
-            aj_err("\"keywords\" must be a list of at most 20 strings");
-        }
-    }
-    if (FIELD("author")) {
-        aj_person(FIELD("author"), "author");
-    }
-    const cJSON *co = FIELD("contributors");
-    if (co && !cJSON_IsArray(co)) {
-        aj_err("\"contributors\" must be a list of people");
-    }
-    cJSON_ArrayForEach(e, (cJSON_IsArray(co) ? co : NULL))
-    {
-        aj_person(e, "a contributor");
-    }
-    const cJSON *rp = FIELD("repository");
-    if (rp && !cJSON_IsString(rp) &&
-        !(cJSON_IsObject(rp) && cJSON_IsString(cJSON_GetObjectItemCaseSensitive(rp, "url")))) {
-        aj_err("\"repository\" must be \"https://...\", \"github:user/repo\" or {\"type\": \"git\", \"url\": ...}");
-    }
-    const cJSON *bg = FIELD("bugs");
-    if (bg && !cJSON_IsString(bg) &&
-        !(cJSON_IsObject(bg) && (cJSON_IsString(cJSON_GetObjectItemCaseSensitive(bg, "url")) ||
-                                 cJSON_IsString(cJSON_GetObjectItemCaseSensitive(bg, "email"))))) {
-        aj_err("\"bugs\" must be a URL or {\"url\": ..., \"email\": ...}");
-    }
-    const cJSON *en = FIELD("engines");
-    if (en) {
-        const cJSON *bc = cJSON_GetObjectItemCaseSensitive(en, "botcore");
-        if (!cJSON_IsObject(en)) {
-            aj_err("\"engines\" must be {\"botcore\": \">=0.1.0\"}");
-        } else if (bc && (!cJSON_IsString(bc) || sv_satisfies("0.0.0", bc->valuestring) < 0)) {
-            aj_err("engines.botcore must be a version range like \">=0.1.0\", \"^1.2.0\" or \"*\"");
-        } else if (bc && g_core_version[0] && sv_valid(g_core_version) &&
-                   sv_satisfies(g_core_version, bc->valuestring) == 0) {
-            aj_err("engines.botcore is \"%s\", but the runtime being packed is botcore %s", bc->valuestring,
-                   g_core_version);
-        }
-        for (const cJSON *f = cJSON_IsObject(en) ? en->child : NULL; f; f = f->next) {
-            if (strcmp(f->string, "botcore") != 0) {
-                aj_warn("engines.%s is not known (only botcore)", f->string);
+        if (key && !in_cfg_list(key, nm)) {
+            char tag[260];
+            snprintf(tag, sizeof(tag), "|%s/%s|", key, nm);
+            if (!strstr(seen, tag) && strlen(seen) + strlen(tag) < sizeof(seen)) {
+                strcat(seen, tag);
+                char m[300];
+                snprintf(m, sizeof(m), "%s \"%s\" is not listed in config.json \"%s\"; it is left out", key, nm, key);
+                warn("%s", m);
             }
+            free(items[i].path);
+            free(items[i].full);
+            continue;
+        }
+        items[w++] = items[i];
+    }
+    n_items = w;
+    const cJSON *e;
+    cJSON_ArrayForEach(e, (cJSON_IsArray(sk) ? sk : NULL))
+    {
+        char p[300];
+        snprintf(p, sizeof(p), "skills/%s/SKILL.md", cJSON_IsString(e) ? e->valuestring : "");
+        if (!has_item(p)) {
+            cfg_err("skill \"%s\" is listed but there is no %s", cJSON_IsString(e) ? e->valuestring : "?", p);
         }
     }
-    const cJSON *rq = FIELD("requires");
-    if (rq) {
-        int bad = !cJSON_IsArray(rq);
-        cJSON_ArrayForEach(e, (cJSON_IsArray(rq) ? rq : NULL))
-        {
-            bad |= !cJSON_IsString(e) || !*e->valuestring || strpbrk(e->valuestring, " /;|&$`'\"");
-        }
-        if (bad) {
-            aj_err("\"requires\" must be a list of command names, e.g. [\"python3\", \"git\"]");
+    cJSON_ArrayForEach(e, (cJSON_IsArray(tl) ? tl : NULL))
+    {
+        char p[300];
+        snprintf(p, sizeof(p), "tools/bin/%s", cJSON_IsString(e) ? e->valuestring : "");
+        if (!has_item(p)) {
+            cfg_err("tool \"%s\" is listed but there is no %s", cJSON_IsString(e) ? e->valuestring : "?", p);
         }
     }
-    /* tools started through an interpreter (#!) need it on the machine: say so in requires */
+}
+
+/* Script tools need their interpreter on the machine: it belongs in "requires". */
+static void check_requires(void)
+{
     for (size_t i = 0; i < n_items; i++) {
         if (items[i].kind != K_SCRIPT || !items[i].data) {
             continue;
         }
-        char interp[64] = "";
         const char *l = items[i].data + 2, *nl = strchr(l, '\n');
         char line[300];
         snprintf(line, sizeof(line), "%.*s", (int)(nl ? nl - l : (long)strlen(l)), l);
@@ -621,90 +619,12 @@ static void check_agent_json(void)
         } else if (tok && strrchr(tok, '/')) {
             tok = strrchr(tok, '/') + 1;
         }
-        if (!tok || !strcmp(tok, "sh") || !strcmp(tok, "bash")) {
-            continue;
-        }
-        snprintf(interp, sizeof(interp), "%s", tok);
-        int listed = 0;
-        cJSON_ArrayForEach(e, (cJSON_IsArray(rq) ? rq : NULL))
-        {
-            listed |= cJSON_IsString(e) && !strcmp(e->valuestring, interp);
-        }
-        if (!listed) {
-            char m[200];
-            snprintf(m, sizeof(m), "%s runs with %s: add \"%s\" to \"requires\"", items[i].path, interp, interp);
-            aj_warn("%s", m);
+        if (tok && strcmp(tok, "sh") != 0 && strcmp(tok, "bash") != 0 && !in_cfg_list("requires", tok)) {
+            char m[300];
+            snprintf(m, sizeof(m), "%s runs with %s: add \"%s\" to \"requires\"", items[i].path, tok, tok);
+            cfg_warn("%s", m);
         }
     }
-    const cJSON *llm = FIELD("llm");
-    if (llm) {
-        static const char *const prov[] = {"gemini", "openai", "openrouter", "groq", "ollama", "custom", NULL};
-        static const char *const lk[] = {"provider", "model", "base_url", "temperature", "max_tool_rounds", NULL};
-        if (!cJSON_IsObject(llm)) {
-            aj_err("\"llm\" must be an object: {\"provider\", \"model\", \"base_url\", \"temperature\", \"max_tool_rounds\"}");
-        }
-        for (const cJSON *f = cJSON_IsObject(llm) ? llm->child : NULL; f; f = f->next) {
-            int k = 0;
-            while (lk[k] && strcmp(lk[k], f->string) != 0) {
-                k++;
-            }
-            if (!lk[k]) {
-                if (strstr(f->string, "key")) {
-                    aj_err("llm.%s: never put an API key in agent.json; the user enters it at start-up", f->string);
-                } else {
-                    aj_warn("llm.%s is not known (provider, model, base_url, temperature, max_tool_rounds)", f->string);
-                }
-            }
-        }
-        const cJSON *p = cJSON_GetObjectItemCaseSensitive(llm, "provider");
-        const cJSON *u = cJSON_GetObjectItemCaseSensitive(llm, "base_url");
-        const cJSON *m = cJSON_GetObjectItemCaseSensitive(llm, "model");
-        const cJSON *t = cJSON_GetObjectItemCaseSensitive(llm, "temperature");
-        const cJSON *r = cJSON_GetObjectItemCaseSensitive(llm, "max_tool_rounds");
-        if (p) {
-            int k = 0;
-            while (prov[k] && !(cJSON_IsString(p) && !strcmp(prov[k], p->valuestring))) {
-                k++;
-            }
-            if (!prov[k]) {
-                aj_err("llm.provider must be one of gemini, openai, openrouter, groq, ollama, custom");
-            }
-        }
-        if (cJSON_IsString(p) && !strcmp(p->valuestring, "custom") && !cJSON_IsString(u)) {
-            aj_err("llm.provider \"custom\" needs llm.base_url");
-        }
-        if (u && (!cJSON_IsString(u) ||
-                  !(strncmp(u->valuestring, "https://", 8) == 0 || strncmp(u->valuestring, "http://localhost", 16) == 0 ||
-                    strncmp(u->valuestring, "http://127.0.0.1", 16) == 0))) {
-            aj_err("llm.base_url must be https:// (http:// only for localhost)");
-        }
-        if (m && !cJSON_IsString(m)) {
-            aj_err("llm.model must be a string");
-        }
-        if (t && (!cJSON_IsNumber(t) || t->valuedouble < 0 || t->valuedouble > 2)) {
-            aj_err("llm.temperature must be a number from 0 to 2");
-        }
-        if (r && (!cJSON_IsNumber(r) || r->valuedouble < 1 || r->valuedouble > 100 || r->valuedouble != (int)r->valuedouble)) {
-            aj_err("llm.max_tool_rounds must be a whole number from 1 to 100");
-        }
-    }
-    const cJSON *md = FIELD("mode");
-    if (md && !(cJSON_IsString(md) && (!strcmp(md->valuestring, "build") || !strcmp(md->valuestring, "plan")))) {
-        aj_err("\"mode\" must be \"build\" or \"plan\" (the mode the agent starts in)");
-    }
-    const cJSON *cf = FIELD("config");
-    if (cf) {
-        char *t = cJSON_PrintUnformatted(cf);
-        if (!cJSON_IsObject(cf)) {
-            aj_err("\"config\" must be an object of settings");
-        } else if (t && strlen(t) > 16384) {
-            aj_err("\"config\" is larger than 16 KB; put data in a file the agent reads");
-        }
-        free(t);
-        aj_secrets(cf, "config");
-    }
-#undef FIELD
-    cJSON_Delete(j);
 }
 
 /* Load every item; classify tools/bin entries as ELF or script. */
@@ -807,22 +727,14 @@ static int cmd_build(const char *dir, const char *botcore, const char *out)
              botcore);
     }
 
+    load_config(dir);
     add_root_file(dir, "agent.md");
-    add_root_file(dir, "agent.json");
+    add_root_file(dir, "config.json");
     add_root_file(dir, "SQNC.md");
-    static const char *const old_names[] = {"FLOW.md", "flow.md"};
-    for (int k = 0; k < 2 && !has_item("SQNC.md"); k++) {
-        char *lf = join(dir, old_names[k]);
-        struct stat lst;
-        if (lstat(lf, &lst) == 0 && S_ISREG(lst.st_mode)) {
-            warn("%s: the flow file is now called SQNC.md; rename it (embedded as SQNC.md this time)", lf);
-            add_item("SQNC.md", lf, K_DATA);
-        }
-        free(lf);
-    }
     add_tree(dir, "skills", K_DATA, 0);
     add_tree(dir, "tools/doc", K_DATA, 0);
     add_tree(dir, "tools/bin", K_DATA, 1);
+    select_from_config();
     if (errors) {
         return 1;
     }
@@ -831,10 +743,7 @@ static int cmd_build(const char *dir, const char *botcore, const char *out)
     if (errors) {
         return 1;
     }
-    check_agent_json();
-    if (errors) {
-        return 1;
-    }
+    check_requires();
     if (!has_item("agent.md")) {
         warn("no agent.md (%s: default system prompt will be used)", "agent");
     }
@@ -849,7 +758,6 @@ static int cmd_build(const char *dir, const char *botcore, const char *out)
             memset(&prog, 0, sizeof(prog));
             prog.diag = sqnc_diag;
             if (sq_parse(items[i].data, items[i].len, &prog) == 0) {
-                sq_check_config(sqnc_has_config);
                 sq_check(&prog, sqnc_has_tool, sqnc_has_skill);
             }
             sq_free(&prog);
@@ -991,28 +899,18 @@ static int cmd_list(const char *file)
     const unsigned char *b = d + boff;
     uint32_t             cnt = get32(b + 8);
     static const char   *kn[] = {"data", "elf", "script"};
-    for (uint32_t i = 0; i < cnt; i++) { /* the agent's metadata first */
+    for (uint32_t i = 0; i < cnt; i++) { /* config.json first */
         const unsigned char *e = b + BLOB_HEADER_SIZE + (size_t)i * BLOB_ENTRY_SIZE;
-        if (strcmp((const char *)b + get32(e), "agent.json") != 0) {
+        if (strcmp((const char *)b + get32(e), "config.json") != 0) {
             continue;
         }
         cJSON *j = cJSON_ParseWithLength((const char *)b + get64(e + 8), (size_t)get64(e + 16));
-        static const char *const keys[] = {"display_name", "name",   "version", "description", "keywords", "author",
-                                           "license",    "homepage", "repository", "bugs",     "engines",
-                                           "requires",   "llm",     "mode",        "autostart", "config"};
-        for (int k = 0; k < 16; k++) {
-            const cJSON *f = cJSON_GetObjectItemCaseSensitive(j, keys[k]);
-            if (!f) {
-                continue;
-            }
+        for (const cJSON *f = cJSON_IsObject(j) ? j->child : NULL; f; f = f->next) {
             char *t = cJSON_IsString(f) ? strdup(f->valuestring) : cJSON_PrintUnformatted(f);
-            if (t && *t) {
-                printf("%-12s %s\n", keys[k], t);
+            if (t) {
+                printf("%-13s %s\n", f->string, t);
             }
             free(t);
-        }
-        if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j, "offline"))) {
-            printf("%-12s %s\n", "network", "offline");
         }
         cJSON_Delete(j);
     }

@@ -59,11 +59,11 @@ drive() {
     (cd "$wd" && printf '6\nhttp://127.0.0.1:%s/v1\n\nstub\ngo\n/exit\n' "$PORT" |
         timeout 60 env "$@" "$bot" >"$T/out" 2>&1)
 }
-# mkagent DIR [agent.json content]: a minimal agent project
+# mkagent DIR [config.json content]: a minimal agent project
 mkagent() {
     mkdir -p "$1"
     echo "You are a test agent." >"$1/agent.md"
-    [ $# -gt 1 ] && printf '%s\n' "$2" >"$1/agent.json"
+    [ $# -gt 1 ] && printf '%s\n' "$2" >"$1/config.json"
     return 0
 }
 build() { "$PACK" build "$1" "$CORE" "$2" >"$T/build.log" 2>&1; }
@@ -110,53 +110,58 @@ sq_bad "an unclosed \`\`\`sqnc block is rejected" 'RETURN "Read " + `files.lengt
 ```' 'RETURN "Read " + `files.length` + " files"' 'is never closed with ```'
 sq_bad "decisions written as prose are a warning" 'Skip it.' 'if it is empty, skip it' "SQNC.md:17: warning: write 'if' as a Sqnc statement"
 
-# agent.json: metadata checked by the build, shown by list, --version, the start-up line and the system prompt
-mkagent "$T/meta" '{"name": "meta-agent", "version": "1.2.3", "description": "Tests metadata.", "author": "QA", "license": "MIT"}'
+# config.json: checked by the build, shown by list, --version, the start-up line and the system prompt
+mkagent "$T/meta" '{"name": "meta-agent", "display_name": "Meta Agent", "version": "1.2.3", "description": "Tests metadata."}'
 build "$T/meta" "$T/meta.bot"
-check_not "agent.json: valid metadata builds without agent.json warnings" "$T/build.log" "agent.json"
+check_not "config.json: a valid config builds without config.json warnings" "$T/build.log" "config.json"
 "$PACK" list "$T/meta.bot" >"$T/list.log" 2>&1
-check "agent.json: list shows name, version and description" "$T/list.log" "^version +1\\.2\\.3"
+check "config.json: list shows it" "$T/list.log" "^version +1\.2\.3"
 "$T/meta.bot" --version >"$T/ver.log" 2>&1
-check "agent.json: --version prints the agent's name and version" "$T/ver.log" "^meta-agent 1\\.2\\.3"
-# meta_bad NAME JSON PATTERN: building with this agent.json must report PATTERN
-meta_bad() {
-    mkagent "$T/meta_bad" "$2"
-    rm -f "$T/meta_bad.bot"
-    "$PACK" build "$T/meta_bad" "$CORE" "$T/meta_bad.bot" >"$T/build.log" 2>&1
-    check "agent.json: $1" "$T/build.log" "$3"
+check "config.json: --version prints the agent's name and version" "$T/ver.log" "^meta-agent 1\.2\.3"
+# cfg_bad NAME JSON PATTERN: building with this config.json must report PATTERN
+cfg_bad() {
+    mkagent "$T/cfg_bad" "$2"
+    rm -f "$T/cfg_bad.bot"
+    "$PACK" build "$T/cfg_bad" "$CORE" "$T/cfg_bad.bot" >"$T/build.log" 2>&1
+    check "config.json: $1" "$T/build.log" "$3"
 }
-meta_bad "a version that is not semver is an error" '{"name": "a", "version": "1.0"}' 'version "1\.0" is not a semantic version'
-if [ -e "$T/meta_bad.bot" ]; then fail "agent.json: an invalid agent.json is not built"; else pass "agent.json: an invalid agent.json is not built"; fi
-meta_bad "a bad name is an error" '{"name": "My Agent", "version": "1.0.0"}' 'name "My Agent" must be'
-meta_bad "invalid JSON is an error" '{"name": "a", "version": }' 'not a valid JSON object'
-meta_bad "a wrong type is an error" '{"name": "a", "version": "1.0.0", "offline": "yes"}' '"offline" must be true or false'
-meta_bad "an unknown key is a warning" '{"name": "a", "version": "1.0.0", "colour": "red"}' 'warning: agent.json: unknown key "colour"'
-meta_bad "missing name and version are warnings" '{"offline": false}' 'warning: agent.json: no "name"'
-meta_bad "keywords must be a list" '{"name": "a", "version": "1.0.0", "keywords": "x"}' '"keywords" must be a list'
-meta_bad "an unknown llm provider is an error" '{"name": "a", "version": "1.0.0", "llm": {"provider": "acme"}}' 'llm.provider must be one of'
-meta_bad "an API key in llm is refused" '{"name": "a", "version": "1.0.0", "llm": {"api_key": "sk-1"}}' 'never put an API key in agent.json'
-meta_bad "a secret in config is refused" '{"name": "a", "version": "1.0.0", "config": {"smtp": {"password": "x"}}}' 'config.smtp.password looks like a secret'
-meta_bad "a bad engines range is an error" '{"name": "a", "version": "1.0.0", "engines": {"botcore": "newest"}}' 'engines.botcore must be a version range'
-meta_bad "an engines range the runtime does not meet is an error" '{"name": "a", "version": "1.0.0", "engines": {"botcore": ">=99.0.0"}}' 'but the runtime being packed is botcore'
-meta_bad "an unknown mode is an error" '{"name": "a", "version": "1.0.0", "mode": "fast"}' '"mode" must be "build" or "plan"'
-meta_bad "requires takes command names" '{"name": "a", "version": "1.0.0", "requires": ["rm -rf"]}' '"requires" must be a list of command names'
+cfg_bad "a version that is not MAJOR.MINOR.PATCH is an error" '{"name": "a", "version": "1.0"}' 'version "1\.0" is not MAJOR\.MINOR\.PATCH'
+if [ -e "$T/cfg_bad.bot" ]; then fail "config.json: an invalid config is not built"; else pass "config.json: an invalid config is not built"; fi
+cfg_bad "a bad name is an error" '{"name": "My Agent", "version": "1.0.0"}' 'name "My Agent" must be'
+cfg_bad "invalid JSON is an error" '{"name": "a", "version": }' 'not a valid JSON object'
+cfg_bad "a wrong type is an error" '{"name": "a", "version": "1.0.0", "internet": "yes"}' '"internet" must be true or false'
+cfg_bad "an unknown key is a warning" '{"name": "a", "version": "1.0.0", "author": "x"}' 'warning: config.json: unknown key "author"'
+cfg_bad "missing name, version, description are warnings" '{"internet": true}' 'warning: config.json: no "name"'
+cfg_bad "requires takes command names" '{"name": "a", "version": "1.0.0", "requires": ["rm -rf"]}' '"requires" must be a list of names'
+cfg_bad "a listed skill must exist" '{"name": "a", "version": "1.0.0", "skills": ["ghost"]}' 'skill "ghost" is listed but there is no skills/ghost/SKILL.md'
+mkagent "$T/cfg_old"
+echo '{}' >"$T/cfg_old/agent.json"
+"$PACK" check "$T/cfg_old" "$CORE" >"$T/build.log" 2>&1
+check "config.json: an old agent.json is reported" "$T/build.log" "agent.json is now config.json"
+# skills / tools lists choose what is compiled in
+mkagent "$T/pick" '{"name": "pick", "version": "1.0.0", "description": "d", "skills": ["keep"], "tools": ["tkeep"], "requires": ["python3"]}'
+mkdir -p "$T/pick/skills/keep" "$T/pick/skills/drop" "$T/pick/tools/bin" "$T/pick/tools/doc"
+for k in keep drop; do printf -- '---\nname: %s\ndescription: d\n---\n' $k >"$T/pick/skills/$k/SKILL.md"; done
+for t in tkeep tdrop; do printf '#!/usr/bin/env python3\nprint(1)\n' >"$T/pick/tools/bin/$t"; chmod +x "$T/pick/tools/bin/$t"; echo '{"description": "d"}' >"$T/pick/tools/doc/$t.json"; done
+build "$T/pick" "$T/pick.bot"
+"$PACK" list "$T/pick.bot" >"$T/list.log" 2>&1
+check "config.json skills: a listed skill is compiled in" "$T/list.log" "skills/keep/SKILL.md"
+check_not "config.json skills: an unlisted skill is left out" "$T/list.log" "skills/drop/"
+check "config.json tools: a listed tool is compiled in" "$T/list.log" "tools/bin/tkeep$"
+check_not "config.json tools: an unlisted tool and its doc are left out" "$T/list.log" "tdrop"
+check "config.json: leaving one out is a warning" "$T/build.log" 'skills "drop" is not listed in config.json "skills"'
 mkagent "$T/needpy" '{"name": "needpy", "version": "1.0.0", "description": "d"}'
 mkdir -p "$T/needpy/tools/bin" "$T/needpy/tools/doc"
 printf '#!/usr/bin/env python3\nprint(1)\n' >"$T/needpy/tools/bin/pyt"; chmod +x "$T/needpy/tools/bin/pyt"
 echo '{"description": "d"}' >"$T/needpy/tools/doc/pyt.json"
 "$PACK" check "$T/needpy" "$CORE" >"$T/build.log" 2>&1
-check "agent.json: a script tool's interpreter missing from requires is a warning" "$T/build.log" 'runs with python3: add "python3" to "requires"'
-mkagent "$T/cfgflow" '{"name": "cfgflow", "version": "1.0.0", "description": "d", "config": {"city": "Lahore"}}'
-printf -- '---\nspec-version: "sqnc-1"\ntitle: "c"\n---\n```sqnc\nRETURN "City: " + `config.cityy`\n```\n' >"$T/cfgflow/SQNC.md"
-"$PACK" check "$T/cfgflow" "$CORE" >"$T/build.log" 2>&1
-check "agent.json: SQNC.md may only use config fields that exist" "$T/build.log" '`config.cityy`: agent.json "config" has no "cityy"'
-if grep -q "\"version\": \"$(cat "$ROOT/VERSION")\"" "$ROOT/agent.json"; then pass "agent.json: Botter's version matches VERSION"; else fail "agent.json: Botter's version matches VERSION"; fi
+check "config.json: a script tool's interpreter missing from requires is a warning" "$T/build.log" 'runs with python3: add "python3" to "requires"'
 
 # ---------------------------------------------------------------------------
 section "Runtime: network modes, sandbox, system prompt (stub LLM)"
 
 mkagent "$T/on" && build "$T/on" "$T/on.bot"
-mkagent "$T/off" '{"offline": true}' && build "$T/off" "$T/off.bot"
+mkagent "$T/off" '{"internet": false}' && build "$T/off" "$T/off.bot"
 mkdir -p "$T/ws"
 
 shell_call "echo hello-from-tool"
@@ -268,30 +273,12 @@ check "SQNC.md present: system prompt explains the [Sqnc] steps" "$T/rec/system.
 
 stub_start --text /dev/null
 drive "$T/meta.bot" "$T/ws"
-check "agent.json: the agent shows its name and version at start" "$T/out" "meta-agent.*1\\.2\\.3.*Tests metadata"
-check "agent.json: the model knows its name and version" "$T/rec/system.txt" 'You are the agent "meta-agent", version 1\.2\.3\. Tests metadata\. Made by QA\.'
-
-# agent.json settings at run time: llm defaults + temperature, requires, mode, autostart, config
-stub_start --text /dev/null
-mkagent "$T/full" "{\"name\": \"full\", \"version\": \"2.0.0\", \"description\": \"Full manifest.\",
-  \"requires\": [\"definitely-not-installed-cmd\"], \"mode\": \"plan\", \"autostart\": false,
-  \"llm\": {\"provider\": \"custom\", \"base_url\": \"http://127.0.0.1:$PORT/v1\", \"model\": \"stub\", \"temperature\": 0.2},
-  \"config\": {\"city\": \"Lahore\", \"max_leads\": 20}}"
-printf -- '---\nspec-version: "sqnc-1"\ntitle: "c"\n---\n```sqnc\nRETURN "City: " + `config.city`\n```\n' >"$T/full/SQNC.md"
-build "$T/full" "$T/full.bot"
-(cd "$T/ws" && printf '\n\n\nhello\n/run\n/exit\n' | timeout 60 "$T/full.bot" >"$T/out" 2>&1)
-check "agent.json llm: a keyless provider named by the agent connects by itself" "$T/out" "Using http://127\\.0\\.0\\.1:$PORT/v1 · stub"
-check "agent.json llm: temperature is sent" "$T/rec/temperature.txt" "^0\\.2"
-check "agent.json requires: missing programs are reported at start" "$T/out" "not installed here: definitely-not-installed-cmd"
-check "agent.json mode: the agent starts in Plan mode" "$T/out" "Plan mode: read-only"
-check "agent.json autostart false: the flow waits for /run" "$T/out" "this agent has a flow: /run starts it"
-check "agent.json config: the flow reads config fields" "$T/out" "City: Lahore"
-check "agent.json config: the model is told its configuration" "$T/rec/system.txt" 'Your configuration .*"city":"Lahore"'
-mkagent "$T/cfgtool" '{"name": "cfgtool", "version": "1.0.0", "description": "d", "config": {"city": "Lahore"}}'
-build "$T/cfgtool" "$T/cfgtool.bot"
-shell_call 'echo "cfg=$AGENT_CONFIG name=$AGENT_NAME"'
-drive "$T/cfgtool.bot" "$T/ws"
-check "agent.json config: tools get it as AGENT_CONFIG, with AGENT_NAME" "$T/rec/tool.txt" 'cfg=\{"city":"Lahore"\} name=cfgtool'
+check "config.json: the agent shows its display name and version at start" "$T/out" "Meta Agent.*1\.2\.3.*Tests metadata"
+check "config.json: the model knows its name and version" "$T/rec/system.txt" 'You are the agent "Meta Agent", version 1\.2\.3\. Tests metadata\.'
+mkagent "$T/needcmd" '{"name": "needcmd", "version": "1.0.0", "description": "d", "requires": ["definitely-not-installed-cmd"]}'
+build "$T/needcmd" "$T/needcmd.bot"
+drive "$T/needcmd.bot" "$T/ws"
+check "config.json requires: missing programs are reported at start" "$T/out" "not installed here: definitely-not-installed-cmd"
 
 # Sqnc interpreter: botcore runs the structure; only prose goes to the LLM
 mkagent "$T/sqagent"

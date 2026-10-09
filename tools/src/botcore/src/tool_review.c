@@ -5,7 +5,7 @@
  * done with the named tool or skill and the data available then, do payloads
  * fit the tools' parameters, are loops bounded, is anything outward-facing done
  * without asking, does the flow fit what agent.md says the agent is for.
- * Registered only for builder agents (agent.json {"builder": true}, i.e. Botter).
+ * Registered only for builder agents (config.json "builder": true, i.e. Botter).
  */
 #define _GNU_SOURCE
 #include "chat.h"

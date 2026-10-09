@@ -8,3 +8,20 @@
 tui/botter-tui
 tui/botter-tui-dev
 /dist/
+/tools/src/pack/botter_pack
+/tools/src/botcore/botcore
+/tools/src/botcore/botcore-static
+/tools/src/botcore/obj/
+/tools/src/botcore/obj-musl/
+
+# never commit secrets
+*.pem
+*.key
+.env
+
+# editors
+.vscode/
+.idea/
+*~
+*.swp
+*.o

@@ -1,7 +1,6 @@
 ---
 spec-version: "sqnc-1"
 title: "Botter Session"
-author: "Botter"
 description: "Design an agent with the user, write its files, check them and build them into one .bot file."
 ---
 
@@ -27,8 +26,8 @@ LOAD SKILL "build-agent"
    END IF
 4. EXECUTE tool `fs_list` with payload { "path": "." }
 5. SAVE result INTO VARIABLE `existing`
-6. IF `existing` CONTAINS "agent.md" THEN
-       Read agent.md, agent.json, SQNC.md and the skills in this folder, and say in two sentences what this agent does now.
+6. IF `existing` CONTAINS "config.json" OR `existing` CONTAINS "agent.md" THEN
+       Read config.json, agent.md, SQNC.md and the skills in this folder, and say in two sentences what this agent does now and which version it is.
    END IF
 7. SET `questions` TO one short message with at most 3 questions about purpose, users, limits and existing code that `request` leaves open, each with a proposed default, or "" if nothing important is unclear
 8. IF `questions` IS NOT EMPTY THEN
@@ -63,7 +62,7 @@ LOAD SKILL "build-agent"
            Test the tool `tool.name` by hand with shell_exec and realistic stdin JSON, and fix it if it fails.
        END RETRY
    END FOR
-4. Write agent.json as the project-layout skill says: name, version (0.1.0 for a new agent, bumped for a changed one), a one-sentence description, author or license only if the user gave them, and "offline": true only if `plan` says the agent must work offline.
+4. Write config.json as the project-layout skill says: name (this folder's name), display_name, version (0.1.0 for a new agent; for a changed one, bump PATCH for fixes, MINOR for new abilities, MAJOR for changed behaviour), a one-sentence description, "internet": false only if `plan` says the agent must work offline, the skills and tools written above, and in "requires" every program they need on the machine.
 5. IF `plan` describes more than one step for the agent THEN
        INVOKE SKILL "write-flow" USING context `plan`
    END IF

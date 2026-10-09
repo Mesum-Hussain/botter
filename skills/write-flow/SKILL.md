@@ -12,7 +12,6 @@ SQNC.md is the agent's program for a whole session: which skill and tool to use 
 - The LLM is used only for: plain-English lines (one LLM turn each, with the agent's tools), INVOKE SKILL (the skill's text plus the context), and conditions or values written in prose (`IF the user approved THEN`, `SET \`n\` TO the number of leads in \`leads\``). Each of those costs an LLM call, so prefer exact conditions when the data allows it.
 - An LLM step cannot ask the user anything: put every question in an ASK USER first.
 - RETRY repeats its body while a step in it fails: a tool returning an error, or an LLM step that could not be done.
-- `config` is always set: the "config" object from agent.json. Use `config.city` instead of hard-coding settings (the build checks the field exists).
 - Every value is JSON: strings, numbers, lists, objects. A tool's JSON output becomes an object (`result.items`), text stays text. `x.length` is the size of a list or text.
 
 Every agent with more than one step gets a SQNC.md in the project root. A one-shot agent does not need one.

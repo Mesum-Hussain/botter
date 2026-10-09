@@ -12,7 +12,7 @@
 # Build-time only; none of this is embedded. Needs gcc and musl-gcc (Fedora: musl-gcc musl-libc-static).
 
 # also drop compiler notes (Fedora annobin adds ~15KB) that plain strip keeps
-VERSION     := $(shell cat VERSION)
+VERSION     := $(shell sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' config.json 2>/dev/null)
 export VERSION
 STRIP_NOTES ?= -R .comment -R .note.gnu.property -R .annobin.notes -R .gnu.build.attributes
 
@@ -22,7 +22,7 @@ TOOL_NAMES  = agent_build agent_inspect
 TOOL_BINS   = $(addprefix tools/bin/,$(TOOL_NAMES))
 CJSON       = $(BOTCORE_DIR)/lib/cjson
 
-AGENT_FILES = $(shell find agent.md SQNC.md agent.json skills tools/doc -type f 2>/dev/null)
+AGENT_FILES = $(shell find agent.md SQNC.md config.json skills tools/doc -type f 2>/dev/null)
 
 # The TUI runs the agent from a memfd, so the agent's own executable (which agent_build
 # uses as the runtime for new agents) is plain botcore + pack, without the TUI.
@@ -46,14 +46,14 @@ artifacts/botcore: $(wildcard $(BOTCORE_DIR)/src/*.c $(BOTCORE_DIR)/src/*.h)
 	@mkdir -p artifacts
 	cp $(BOTCORE_DIR)/botcore-static $@
 
-artifacts/botter_pack: $(PACK_DIR)/botter_pack.c $(BOTCORE_DIR)/src/semver.h $(BOTCORE_DIR)/src/sqnc.c $(BOTCORE_DIR)/src/sqnc.h $(CJSON)/cJSON.c
+artifacts/botter_pack: $(PACK_DIR)/botter_pack.c $(BOTCORE_DIR)/src/sqnc.c $(BOTCORE_DIR)/src/sqnc.h $(CJSON)/cJSON.c
 	@mkdir -p artifacts
 	musl-gcc -Os -static -std=gnu11 -Wall -Wextra -I$(CJSON) -ffunction-sections -fdata-sections -Wl,--gc-sections -o $@ $< $(CJSON)/cJSON.c -lm
 	strip $(STRIP_NOTES) $@
 
 AGENT_TOOLS = tools/src/agent_tools/agent_tools
 
-$(AGENT_TOOLS): tools/src/agent_tools/agent_tools.c $(PACK_DIR)/botter_pack.c $(BOTCORE_DIR)/src/semver.h $(BOTCORE_DIR)/src/sqnc.c $(BOTCORE_DIR)/src/sqnc.h $(CJSON)/cJSON.c
+$(AGENT_TOOLS): tools/src/agent_tools/agent_tools.c $(PACK_DIR)/botter_pack.c $(BOTCORE_DIR)/src/sqnc.c $(BOTCORE_DIR)/src/sqnc.h $(CJSON)/cJSON.c
 	musl-gcc -Os -static -std=gnu11 -Wall -Wextra -Wno-unused-function -Wno-format-truncation -I$(CJSON) -ffunction-sections -fdata-sections \
 		-Wl,--gc-sections -o $@ tools/src/agent_tools/agent_tools.c $(CJSON)/cJSON.c -lm
 	strip $(STRIP_NOTES) $@

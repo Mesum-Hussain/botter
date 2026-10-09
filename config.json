@@ -1,0 +1,19 @@
+{
+  "name": "botter",
+  "display_name": "Botter",
+  "version": "0.1.0",
+  "description": "The agent based framework for building agents or agent based compiler for agents: describe one in plain English and Botter designs, writes, checks and builds it into a single Linux executable.",
+  "internet": true,
+  "skills": [
+    "create-agent",
+    "project-layout",
+    "write-agent-md-and-skills",
+    "write-tool",
+    "write-flow",
+    "wrap-existing-project",
+    "build-agent"
+  ],
+  "tools": ["agent_build", "agent_inspect"],
+  "requires": ["git"],
+  "builder": true
+}

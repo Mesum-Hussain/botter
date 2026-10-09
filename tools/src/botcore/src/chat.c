@@ -21,8 +21,6 @@ int chat_init(chat_t *c, const char *base, const char *key, const char *model)
     }
     c->model = strdup(model);
     c->hist = cJSON_CreateArray();
-    c->temperature = -1;
-    c->max_rounds = CHAT_MAX_TOOL_ROUNDS;
     if (!c->base || !c->key || !c->model || !c->hist) {
         chat_free(c);
         return -1;
@@ -699,9 +697,6 @@ int chat_ask(chat_t *c, const char *system, const char *question, int with_histo
     cJSON *root = cJSON_CreateObject();
     cJSON *msgs = cJSON_AddArrayToObject(root, "messages");
     cJSON_AddStringToObject(root, "model", c->model);
-    if (c->temperature >= 0) {
-        cJSON_AddNumberToObject(root, "temperature", c->temperature);
-    }
     if (with_history) {
         const cJSON *m;
         cJSON_ArrayForEach(m, c->hist)
@@ -767,12 +762,9 @@ int chat_send(chat_t *c, const char *user, char **reply, char **err)
         goto fail;
     }
 
-    for (int round = 0; round <= c->max_rounds; round++) {
+    for (int round = 0; round <= CHAT_MAX_TOOL_ROUNDS; round++) {
         cJSON *root = cJSON_CreateObject();
         cJSON_AddStringToObject(root, "model", c->model);
-        if (c->temperature >= 0) {
-            cJSON_AddNumberToObject(root, "temperature", c->temperature);
-        }
         cJSON_AddItemReferenceToObject(root, "messages", c->hist);
         if (c->tools && cJSON_GetArraySize(c->tools) > 0) {
             cJSON_AddItemReferenceToObject(root, "tools", c->tools);
