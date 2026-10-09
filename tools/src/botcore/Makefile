@@ -3,20 +3,30 @@
 #   make release    static musl build, stripped (what botter ships) -> ./botcore-static
 #   make clean
 # The agent packer (botter_pack) lives outside this repo.
+# TLS: vendored BearSSL (lib/bearssl, MIT) built as a static archive; CA anchors in lib/ca.
 
 CC       ?= gcc
 CFLAGS   ?= -Os -ffunction-sections -fdata-sections -fno-asynchronous-unwind-tables
 LDFLAGS  ?= -Wl,--gc-sections
 WARN     = -std=gnu11 -Wall -Wextra -Wno-unused-parameter
-INC      = -Isrc -Ilib/cjson
+INC      = -Isrc -Ilib/cjson -Ilib/bearssl/inc -Ilib/ca
+BR_SRCS  = $(wildcard lib/bearssl/src/*.c lib/bearssl/src/*/*.c)
+BR_FLAGS = -Os -ffunction-sections -fdata-sections -fno-asynchronous-unwind-tables -Ilib/bearssl/inc -Ilib/bearssl/src
 
 SRCS     = $(wildcard src/*.c) lib/cjson/cJSON.c
 OBJS     = $(patsubst %.c,obj/%.o,$(SRCS))
 OBJS_REL = $(patsubst %.c,obj-musl/%.o,$(SRCS))
 HDRS     = $(wildcard src/*.h)
 
-botcore: $(OBJS)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) -lm
+botcore: $(OBJS) obj/libbearssl.a
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) obj/libbearssl.a -lm
+
+obj/libbearssl.a: $(patsubst %.c,obj/%.o,$(BR_SRCS))
+	ar rcs $@ $^
+
+obj/lib/bearssl/%.o: lib/bearssl/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(BR_FLAGS) -c -o $@ $<
 
 obj/%.o: %.c $(HDRS)
 	@mkdir -p $(dir $@)
@@ -24,9 +34,16 @@ obj/%.o: %.c $(HDRS)
 
 release: botcore-static
 
-botcore-static: $(OBJS_REL)
-	musl-gcc $(CFLAGS) $(LDFLAGS) -static -o $@ $(OBJS_REL) -lm
+botcore-static: $(OBJS_REL) obj-musl/libbearssl.a
+	musl-gcc $(CFLAGS) $(LDFLAGS) -static -o $@ $(OBJS_REL) obj-musl/libbearssl.a -lm
 	strip $@
+
+obj-musl/libbearssl.a: $(patsubst %.c,obj-musl/%.o,$(BR_SRCS))
+	ar rcs $@ $^
+
+obj-musl/lib/bearssl/%.o: lib/bearssl/%.c
+	@mkdir -p $(dir $@)
+	musl-gcc $(BR_FLAGS) -c -o $@ $<
 
 obj-musl/%.o: %.c $(HDRS)
 	@mkdir -p $(dir $@)

@@ -1,6 +1,6 @@
 # BOTCORE + BOTTER: SPEC + STATUS (AI-consumed; terse by design)
 
-Updated: 2026-10-09 | Phase: Ph3d done (Landlock, rlimits, key hardening); next Ph4 in-process HTTPS | Lang: C11 | Target: x86_64 Linux, latest Fedora (dev: F44, kernel 7.2, SELinux enforcing, Landlock+userns on, musl-gcc)
+Updated: 2026-10-09 | Phase: Ph4 done (in-process HTTPS, no curl); next: tests in repo | Lang: C11 | Target: x86_64 Linux, latest Fedora (dev: F44, kernel 7.2, SELinux enforcing, Landlock+userns on, musl-gcc)
 Legend: [D]=owner decided, [R]=recommendation (unapproved), [S]=spike needed, P0..P3=priority
 
 ## 1. PRODUCT [D]
@@ -49,22 +49,21 @@ Free inside ctx (cwd at launch); ask y/N before outside-ctx access or destructiv
 - Key: RAM-only, never argv/env/disk; mlock'd + explicit_bzero on free; process PR_SET_DUMPABLE 0 (no ptrace/proc mem by same user; netns child re-enables before unshare, else uid_map is root-owned).
 
 ## 7. CODE MAP
-botcore `tools/src/botcore/src` (~3.5K LOC): http.c (curl subprocess, key via stdin config), chat.c (validate, tool loop <=25 rounds, assistant msgs verbatim for Gemini thought_signature, turn-based trim at 300KB, reasoning events), term.c (line editor, SIGINT), main.c (connect flow, network mode, system prompt), tools.c (registry), guard.c (L1/L2, offline flag), tool_fs.c, tool_shell.c (shell_exec + tool_sandbox_apply), tool_ext.c, cron.c, vfs.c, front.c (BOTCORE_FRONTEND=1 JSON-record protocol for the TUI).
+botcore `tools/src/botcore/src` (~4K LOC): http.c (in-process HTTP/1.1: plain for loopback, HTTPS via vendored BearSSL TLS 1.2 [lib/bearssl, MIT, commit 7bea48e5]; profile = ECDHE + AES-GCM/ChaCha20, RSA/ECDSA certs, one ct impl each; 121 Mozilla CA anchors compiled in [lib/ca/ca_anchors.h, MPL-2.0, regen steps in lib/ca/README.md], no host cert files; HTTPS_PROXY http:// CONNECT + Basic auth, NO_PROXY; Content-Length/chunked/close bodies, 1xx skipped, 32MB cap; connect 15s + overall deadline; Ctrl-C abort via 200ms poll slices; request buffer + TLS buffers wiped (key)), chat.c (validate, tool loop <=25 rounds, assistant msgs verbatim for Gemini thought_signature, turn-based trim at 300KB, reasoning events), term.c (line editor, SIGINT), main.c (connect flow, network mode, system prompt), tools.c (registry), guard.c (L1/L2, offline flag), tool_fs.c, tool_shell.c (shell_exec + tool_sandbox_apply), tool_ext.c, cron.c, vfs.c, front.c (BOTCORE_FRONTEND=1 JSON-record protocol for the TUI).
 Botter (repo root is an agent project): agent.md, flow.md, manifest.md, skills/{create-agent,project-layout,write-agent-md-and-skills,write-tool,write-flow,wrap-existing-project,build-agent}, tools agent_manifest/agent_build/agent_inspect (one static ELF `tools/src/agent_tools`, includes packer). Skills enforce: no mocks, agent's own LLM does reasoning (no call_llm tools), stdin-JSON tools with declared parameters, test tools by hand.
-TUI `tui/` (main.c, lay.c, tui.h, logo.h): `make` bundles botter-tui + artifacts/botter.bot (trailer "BOTTUI01"), runs agent from memfd with BOTCORE_FRONTEND=1; non-tty/TERM=dumb/BOTTER_TUI=0 -> plain REPL. Look: terminal's own bg (nothing painted); sage palette 5C7057/89A482/ACC5A6/D1EDD3 light/dark set via OSC 11 (else COLORFGBG, else dark; BOTTER_THEME overrides); Jupyter-like gutter `In [n]:`/`Out[n]:`, user msg = tinted bordered cell, chat box = next In cell; markdown/code/tables, collapsible thinking/tools (ctrl+o), scrollback, mouse wheel, paste, history. Logo 11x12 muted head (no crown/limbs/body).
-Build: `make` -> ./botter; `make tools|artifacts|tui|clean`; botcore `make release` = static musl ~170KB. Needs gcc + musl-gcc. After botcore changes re-run `make`.
+TUI `tui/` (main.c, lay.c, tui.h, logo.h): `make` bundles botter-tui + artifacts/botter.bot (trailer "BOTTUI01"), runs agent from memfd with BOTCORE_FRONTEND=1; non-tty/TERM=dumb/BOTTER_TUI=0 -> plain REPL. Look: terminal's own bg (nothing painted); sage palette 5C7057/89A482/ACC5A6/D1EDD3 light/dark set via OSC 11 (else COLORFGBG, else dark; BOTTER_THEME overrides); Jupyter-like gutter `In [n]:`/`Out[n]:`, user msg = tinted bordered cell, chat box = next In cell; markdown/code/tables, collapsible thinking/tools (ctrl+o), scrollback, mouse wheel, paste, history. Logo 11x13 muted head + neck (no crown/limbs/body).
+Build: `make` -> ./botter; `make tools|artifacts|tui|clean`; botcore `make release` = static musl ~330KB (BearSSL ~58KB, CA anchors ~59KB, musl resolver; was 170KB with curl). BearSSL built as obj*/libbearssl.a with its own flags. Needs gcc + musl-gcc. After botcore changes re-run `make`.
 Tested with stub OpenAI servers (scratchpad only): chat, tools, network modes, OML lint, TUI captures via tmux, Landlock (ctx/tmp write OK, $HOME write/list denied, ~/.local/bin tools run, approved path granted once, agent_build OK, offline netns+Landlock). NOT tested: real-LLM tool calling end to end, real Gemini thoughts.
 
 ## 8. ISSUES
-P0 I1 HTTP via host `curl` (not "any Linux"; key briefly in curl config) -> Ph4 in-process HTTPS (BearSSL, CA bundle in pack).
+Resolved I1 (Ph4): no host curl. Limits: TLS 1.2 only (BearSSL has no 1.3; all presets fine); IP-literal HTTPS hosts fail name check; DNS (getaddrinfo) not interruptible by Ctrl-C; corporate MITM CAs unsupported (no custom CA option yet).
 P1 I4 Classifier bypassable (`python -c`); hard layers cover fs (L3) and offline net (L5). An approved new-file path grants its existing parent (often $HOME) RW for that run.
 P2 memfd exec may be blocked by confined SELinux / vm.memfd_noexec (no fallback). Truncated .bot looks like plain botcore. Editor width = codepoints (CJK). Non-streaming.
 
 ## 9. PLAN / NEXT
 (0) Owner: build the hackathon agents with ./botter + real LLM (problem 2: marketing agent on google-maps-scraper-kit, must work e2e from 2 inputs, model-agnostic, no mocks, opt-out + send caps); tune skills from failures. First attempt (marketbot) failed: argv tools, mock LLM tool -> fixed in skills.
-(a) Ph4 [NEXT]: in-process HTTPS (BearSSL static, minimal HTTP/1.1, CA bundle in pack) -> drop host curl.
-(b) Tests in repo. (c) Detect truncated .bot. (d) Ph6 release/size pass. Deferred: websearch tool, streaming, memory.
-Done: Ph3d Landlock + rlimits + key hardening (2026-10-09); Ph5a-e botter, TUI, network mode, flow.md.
+(a) [NEXT] Tests in repo (only scratchpad harnesses today: stub OpenAI servers, tmux captures, http test client). (b) Detect truncated .bot. (c) Ph6 release/size pass. Deferred: websearch tool, streaming, memory.
+Done: Ph4 in-process HTTPS (2026-10-09; verified vs Gemini/OpenAI/OpenRouter/Groq, badssl failure cases, local chunked/POST/proxy/abort); Ph3d Landlock + rlimits + key hardening; Ph5a-e botter, TUI, network mode, flow.md.
 
 ## 10. AGENT RULES
 - Prefer editing over new files; update THIS file each session, keep terse. Never log keys; no new persistence.
@@ -72,4 +71,4 @@ Done: Ph3d Landlock + rlimits + key hardening (2026-10-09); Ph5a-e botter, TUI, 
 - After code changes run `graphify update .`.
 
 ## 11. LICENSING
-Own C + cJSON (MIT); LICENSE MIT. Release static = musl (avoid static glibc LGPL). Future TLS must be permissive (BearSSL MIT); CA bundle (MPL-2.0) notice must ship.
+Own C + cJSON (MIT) + BearSSL (MIT) + Mozilla CA data (MPL-2.0, unmodified, notice in THIRD_PARTY.md + lib/ca/README.md); LICENSE MIT. Release static = musl (avoid static glibc LGPL).

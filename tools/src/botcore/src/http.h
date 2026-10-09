@@ -2,15 +2,16 @@
 #define BC_HTTP_H
 
 /*
- * Minimal HTTP(S) client. Transport is a curl subprocess (interim; see
- * progress.md I1). The request (URL, auth header, body) is fed to curl on
- * stdin as a config file, so secrets never appear in argv.
+ * Minimal in-process HTTP/1.1 client: plain HTTP (loopback only, enforced by
+ * the caller) or HTTPS via vendored BearSSL (TLS 1.2) with compiled-in Mozilla
+ * CA anchors; no host certificate files, no curl. HTTPS_PROXY (http:// proxy,
+ * CONNECT, optional user:pass) and NO_PROXY are honoured.
  */
 
 typedef struct {
     int   status; /* HTTP status; 0 if no response */
     char *body;   /* NUL-terminated, never NULL after http_request */
-    char *err;    /* transport error text (curl stderr) or NULL */
+    char *err;    /* transport error text or NULL */
 } http_resp_t;
 
 #define HTTP_OK          0
