@@ -669,6 +669,12 @@ static int proxy_connect(conn_t *c, const url_t *px, const url_t *u)
 int http_request(const char *url, const char *bearer, const char *body,
                  int timeout_s, http_resp_t *out)
 {
+    return http_request_stream(url, bearer, body, timeout_s, NULL, NULL, out);
+}
+
+int http_request_stream(const char *url, const char *bearer, const char *body, int timeout_s,
+                        http_body_fn on_body, void *ud, http_resp_t *out)
+{
     memset(out, 0, sizeof(*out));
     out->body = strdup("");
     if (!url || has_ctl(url) || (bearer && has_ctl(bearer))) {
@@ -722,9 +728,10 @@ int http_request(const char *url, const char *bearer, const char *body,
         c->tls = 1;
     }
 
-    int ok = sb_fmt(&rq, "%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: botcore\r\nAccept: application/json\r\n"
+    int ok = sb_fmt(&rq, "%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: botcore\r\nAccept: %s\r\n"
                          "Connection: close\r\n",
-                    body ? "POST" : "GET", u.path, u.authority);
+                    body ? "POST" : "GET", u.path, u.authority,
+                    on_body ? "text/event-stream, application/json" : "application/json");
     if (bearer && *bearer) {
         ok |= sb_add(&rq, "Authorization: Bearer ", 22);
         ok |= sb_add(&rq, bearer, strlen(bearer));
@@ -777,20 +784,30 @@ int http_request(const char *url, const char *bearer, const char *body,
     }
 
     char buf[16384];
+    size_t sent = 0; /* body bytes already passed to on_body */
+    if (status < 200 || status >= 300) {
+        on_body = NULL; /* errors are read whole */
+    }
     for (;;) {
         size_t have = rs.len - hl;
-        if (clen >= 0 && have >= (size_t)clen) {
-            break;
-        }
+        int d = 0;
         if (chunked) {
-            int d = dechunk(rs.p + hl, have, &dec);
+            d = dechunk(rs.p + hl, have, &dec);
             if (d < 0) {
                 fail(c, "malformed chunked response");
                 goto done;
             }
-            if (d == 1) {
-                break;
+        }
+        if (on_body) {
+            const char *bp = chunked ? dec.p : rs.p + hl;
+            size_t bl = chunked ? dec.len : clen >= 0 && have > (size_t)clen ? (size_t)clen : have;
+            if (bl > sent) {
+                on_body(ud, bp + sent, bl - sent);
+                sent = bl;
             }
+        }
+        if ((clen >= 0 && have >= (size_t)clen) || d == 1) {
+            break;
         }
         if (have > MAX_OUT) {
             fail(c, "response too large");

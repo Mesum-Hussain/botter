@@ -305,7 +305,8 @@ typedef struct {
 
 static blk_t *g_b;
 static int    g_nb, g_capb;
-static int    g_expand;        /* ctrl+o: full thinking / tool output */
+static int    g_expand;        /* ctrl+o: details (tool calls, full thinking); off = plain-language view */
+static int    g_s_text = -1, g_s_think = -1; /* blocks receiving streamed text / reasoning, -1 = none */
 static char  *g_model, *g_cwd;
 static int    g_scroll;        /* lines scrolled up from the bottom */
 static int    g_last_total = -1, g_last_cw = -1;
@@ -620,6 +621,12 @@ static void lay_block(blk_t *b, int cw)
     const char *t = b->text.p ? b->text.p : "";
     if (b->kind == B_HEADER) {
         lay_header(b, cw);
+        b->lw = cw;
+        b->lx = g_expand;
+        return;
+    }
+    if (b->kind == B_TOOL && !g_expand) { /* internals: only in the details view */
+        tl_free(&b->L);
         b->lw = cw;
         b->lx = g_expand;
         return;
@@ -1270,7 +1277,7 @@ static void render(void)
         if (footer) {
             rowb_t rb = {&cur[H - 1], 0, W};
             rb_fill(&rb, T.bg, 1);
-            const char *full = "enter send · tab plan/build · alt+enter newline · pgup/pgdn/wheel scroll · ctrl+o expand · ctrl+c quit";
+            const char *full = "enter send · tab plan/build · alt+enter newline · pgup/pgdn/wheel scroll · ctrl+o details · ctrl+c quit";
             const char *mid = "enter send · tab plan/build · pgup/pgdn scroll";
             const char *small = "ctrl+c quit";
             int mw = g_model ? tu_strwidth(g_model, strlen(g_model)) + 2 : 0;
@@ -1407,6 +1414,7 @@ static void on_record(const char *json)
     const char *ev = jstr(j, "ev");
     g_raw_open = 0;
     if (!strcmp(ev, "prompt")) {
+        g_s_text = g_s_think = -1; /* a turn that failed sends no final text: close its stream here */
         char lab[256];
         strip_sgr(jstr(j, "text"), lab, sizeof(lab));
         g_await = 1;
@@ -1453,17 +1461,43 @@ static void on_record(const char *json)
                 g_b[i].lw = -1;
             }
         }
+    } else if (!strcmp(ev, "delta")) {
+        /* streamed piece: append to the open block of its kind, or start one */
+        int think = !strcmp(jstr(j, "kind"), "thinking");
+        int *open = think ? &g_s_think : &g_s_text;
+        if (*open < 0 || *open >= g_nb) {
+            blk_add(think ? B_THINK : B_AGENT);
+            *open = g_nb - 1;
+        }
+        tsb_str(&g_b[*open].text, jstr(j, "text"));
+        g_b[*open].lw = -1;
+        if (think) {
+            g_s_text = -1; /* text after new reasoning starts a new block */
+        } else {
+            snprintf(g_busy_label, sizeof(g_busy_label), "Writing");
+        }
     } else if (!strcmp(ev, "thinking")) {
         blk_text(B_THINK, jstr(j, "text"));
     } else if (!strcmp(ev, "text") || !strcmp(ev, "reply")) {
-        blk_text(B_AGENT, jstr(j, "text"));
+        /* the whole text: replaces what was streamed into the open block */
+        if (g_s_text >= 0 && g_s_text < g_nb) {
+            blk_t *b = &g_b[g_s_text];
+            tsb_free(&b->text);
+            tsb_str(&b->text, jstr(j, "text"));
+            b->lw = -1;
+        } else {
+            blk_text(B_AGENT, jstr(j, "text"));
+        }
+        g_s_text = g_s_think = -1;
     } else if (!strcmp(ev, "tool")) {
+        g_s_text = g_s_think = -1;
         blk_t *b = blk_add(B_TOOL);
         const char *nm = jstr(j, "name");
         tsb_add(&b->text, nm, strlen(nm) + 1); /* name NUL args */
         tsb_str(&b->text, jstr(j, "args"));
         b->state = TOOL_RUN;
-        snprintf(g_busy_label, sizeof(g_busy_label), "Running %s", nm);
+        const char *st = jstr(j, "status");
+        snprintf(g_busy_label, sizeof(g_busy_label), "%s", *st ? st : "Working");
     } else if (!strcmp(ev, "tool_result")) {
         for (int i = g_nb - 1; i >= 0; i--) {
             if (g_b[i].kind == B_TOOL && g_b[i].state == TOOL_RUN) {
@@ -1732,7 +1766,7 @@ static void do_key(int k)
         break;
     case K_CTRLO:
         g_expand = !g_expand;
-        notice(g_expand ? "showing full thinking and tool output" : "details collapsed");
+        notice(g_expand ? "details: tool calls and full thinking" : "details hidden");
         break;
     }
     g_dirty = 1;

@@ -8,5 +8,6 @@
     "required": ["file"]
   },
   "timeout_s": 30,
-  "readonly": true
+  "readonly": true,
+  "status": "Checking the build"
 }

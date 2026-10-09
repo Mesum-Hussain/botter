@@ -8,5 +8,6 @@
       "dry_run": {"type": "boolean", "description": "Only validate the project, write nothing. Default false."}
     }
   },
-  "timeout_s": 120
+  "timeout_s": 120,
+  "status": "Building the agent"
 }

@@ -48,6 +48,7 @@ struct ext_tool {
     int                timeout_s;
     int                network; /* descriptor "network": true: runs outside the empty netns if allowed */
     int                readonly; /* descriptor "readonly": true: changes nothing, runs in Plan mode without asking */
+    char              *status;   /* descriptor "status": what the user sees while it runs, or NULL */
     const vfs_entry_t *exe;
 };
 
@@ -113,6 +114,7 @@ void ext_init(void)
         const cJSON *to = cJSON_GetObjectItemCaseSensitive(j, "timeout_s");
         const cJSON *net = cJSON_GetObjectItemCaseSensitive(j, "network");
         const cJSON *ro = cJSON_GetObjectItemCaseSensitive(j, "readonly");
+        const cJSON *stj = cJSON_GetObjectItemCaseSensitive(j, "status");
         if (!cJSON_IsObject(j) || !cJSON_IsString(desc) || !desc->valuestring[0]) {
             warn(name, "descriptor must be a JSON object with a non-empty \"description\"");
             cJSON_Delete(j);
@@ -139,6 +141,7 @@ void ext_init(void)
         }
         e->network = cJSON_IsTrue(net);
         e->readonly = cJSON_IsTrue(ro);
+        e->status = cJSON_IsString(stj) && *stj->valuestring ? strndup(stj->valuestring, 60) : NULL;
         e->exe = &t[i];
         cJSON_Delete(j);
     }
@@ -268,6 +271,11 @@ static void append(char *buf, size_t cap, size_t *len, size_t *total, const char
     size_t take = n < cap - *len ? n : cap - *len;
     memcpy(buf + *len, data, take);
     *len += take;
+}
+
+const char *ext_status(const ext_tool_t *t)
+{
+    return t->status;
 }
 
 bool ext_run(const ext_tool_t *t, const cJSON *in, char *result, size_t rl)

@@ -16,11 +16,15 @@ typedef struct {
     void (*ev_cb)(void *ud, int kind, const char *text); /* optional: CHAT_EV_* */
     void  *ev_ud;
     int    thoughts; /* ask Gemini for its thoughts (cleared if the endpoint refuses) */
+    int    want_thoughts; /* the UI shows reasoning (chat_set_events) */
+    int    no_stream;     /* endpoint refused "stream": true; plain responses from now on */
 } chat_t;
 
 /* Events (only when an event callback is set; reasoning is then also kept out of the reply). */
-#define CHAT_EV_THINKING 1 /* model reasoning */
-#define CHAT_EV_TEXT     2 /* assistant text sent together with tool calls */
+#define CHAT_EV_THINKING    1 /* model reasoning (whole; non-streaming responses) */
+#define CHAT_EV_TEXT        2 /* assistant text sent together with tool calls (whole, after its deltas) */
+#define CHAT_EV_TEXT_DELTA  3 /* streamed piece of the answer / interim text */
+#define CHAT_EV_THINK_DELTA 4 /* streamed piece of reasoning */
 
 /* Max model<->tool round trips inside one user turn. */
 #define CHAT_MAX_TOOL_ROUNDS 25
@@ -49,8 +53,12 @@ void chat_switch(chat_t *c, chat_t *from);
 /* Enable tool calling. Takes ownership of `tools`. cb runs each call and returns the result text. */
 void chat_set_tools(chat_t *c, cJSON *tools, char *(*cb)(void *, const char *, const char *), void *ud);
 
-/* Report reasoning / interim text through cb (see CHAT_EV_*). */
-void chat_set_events(chat_t *c, void (*cb)(void *, int, const char *), void *ud);
+/*
+ * Report reasoning / interim text through cb (see CHAT_EV_*); replies are
+ * streamed (deltas) when the endpoint supports it. thoughts = ask Gemini for
+ * its reasoning too.
+ */
+void chat_set_events(chat_t *c, void (*cb)(void *, int, const char *), void *ud, int thoughts);
 
 /* Set (or, with NULL/"", clear) the system prompt. Never trimmed from history. */
 int  chat_set_system(chat_t *c, const char *text);

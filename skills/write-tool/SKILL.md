@@ -36,7 +36,7 @@ Only add a tool when file tools and shell commands are not enough.
   "timeout_s": 60
 }
 ```
-   "parameters" is a JSON Schema object; without it the LLM sees a tool with no arguments, so declare every argument the tool reads. "timeout_s" optional. "network": true optional (offline agents only, see Network). "readonly": true optional: only for a tool that changes nothing anywhere (no file writes, no messages sent, no API calls that change data); such a tool runs in Plan mode without asking, every other tool asks the user first there. Other keys (name, path) are ignored.
+   "parameters" is a JSON Schema object; without it the LLM sees a tool with no arguments, so declare every argument the tool reads. "timeout_s" optional. "network": true optional (offline agents only, see Network). "readonly": true optional: only for a tool that changes nothing anywhere (no file writes, no messages sent, no API calls that change data); such a tool runs in Plan mode without asking, every other tool asks the user first there. "status" optional: what the user sees while the tool runs, in plain words, e.g. "Searching for leads" (the user never sees tool names; default "Working"). Other keys (name, path) are ignored.
 3. tools/doc/<name>.md     optional prose: examples, caveats. The agent reads it with vfs_read.
 4. tools/src/<name>/       source of COMPILED tools only (never embedded, never deleted).
 

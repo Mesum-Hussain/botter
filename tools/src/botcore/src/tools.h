@@ -45,6 +45,7 @@ void   ext_init(void);                           /* scan the VFS, print warnings
 const ext_tool_t *ext_find(const char *name);
 void   ext_schema_append(cJSON *arr);
 bool   ext_run(const ext_tool_t *t, const cJSON *input, char *result, size_t result_len);
+const char *ext_status(const ext_tool_t *t); /* descriptor "status" (e.g. "Searching for leads") or NULL */
 /* Tools whose descriptor says "network": true -> count; names comma-joined into `names`. */
 size_t ext_network_tools(char *names, size_t cap);
 void   ext_allow_network(int allow); /* user's per-session answer (default: denied) */

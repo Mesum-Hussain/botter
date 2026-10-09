@@ -19,6 +19,8 @@ ap.add_argument("--tool")
 ap.add_argument("--args", default="{}")
 ap.add_argument("--text")
 ap.add_argument("--slow", action="store_true")
+ap.add_argument("--nostream", action="store_true", help='answer 400 to "stream": true')
+ap.add_argument("--think", action="store_true", help="start the text answer with a <think> block")
 a = ap.parse_args()
 os.makedirs(a.record, exist_ok=True)
 
@@ -56,8 +58,43 @@ class H(BaseHTTPRequestHandler):
         if users:
             save("user.txt", users[-1]["content"])
 
+        stream = bool(req.get("stream"))
+        save("stream.txt", "stream" if stream else "plain")
+        if stream and a.nostream:
+            self.send({"error": {"message": "stream not supported"}}, 400)
+            return
+        for m in msgs:
+            if m.get("tool_calls"):
+                save("calls.txt", json.dumps(m["tool_calls"]))
+
+        def sse(obj):
+            self.wfile.write(b"data: " + json.dumps(obj).encode() + b"\n\n")
+            self.wfile.flush()
+            time.sleep(0.02)
+
         def reply(msg):
-            self.send({"choices": [{"message": dict(role="assistant", **msg), "finish_reason": "stop"}]})
+            if not stream:
+                self.send({"choices": [{"message": dict(role="assistant", **msg), "finish_reason": "stop"}]})
+                return
+            # Server-Sent Events: text in 3-character pieces, tool call arguments split in two
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            self.wfile.write(b": keep-alive comment\n\n")
+            text = msg.get("content") or ""
+            for i in range(0, len(text), 3):
+                sse({"choices": [{"index": 0, "delta": {"content": text[i:i + 3]}}]})
+            for k, c in enumerate(msg.get("tool_calls") or []):
+                args = c["function"]["arguments"]
+                h = len(args) // 2
+                first = {"index": k, "id": c["id"], "type": "function",
+                         "function": {"name": c["function"]["name"], "arguments": args[:h]},
+                         "extra_content": {"google": {"thought_signature": "sig-%d" % k}}}
+                sse({"choices": [{"index": 0, "delta": {"tool_calls": [first]}}]})
+                sse({"choices": [{"index": 0, "delta": {"tool_calls": [{"index": k, "function": {"arguments": args[h:]}}]}}]})
+            sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
 
         if a.text:
             reply({"content": open(a.text).read()})
@@ -67,7 +104,7 @@ class H(BaseHTTPRequestHandler):
         else:
             if msgs[-1]["role"] == "tool":
                 save("tool.txt", msgs[-1]["content"])
-            reply({"content": "done"})
+            reply({"content": "<think>pondering the task</think>Hello there, streamed reply." if a.think else "done"})
 
 
 srv = ThreadingHTTPServer(("127.0.0.1", 0), H)

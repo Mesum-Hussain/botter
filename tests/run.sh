@@ -152,6 +152,24 @@ else
     check "Plan mode: read-only commands still run" "$T/rec/tool.txt" "READ-OK"
 fi
 
+# Streaming (Server-Sent Events) and what the user sees
+stub_start --think
+drive "$T/on.bot" "$T/ws"
+check "streaming: the request asks for a stream" "$T/rec/stream.txt" "^stream"
+check "streaming: the streamed answer is printed" "$T/out" "Hello there, streamed reply\\."
+check_not "streaming: <think> reasoning is not printed as the answer" "$T/out" "pondering|<think>"
+shell_call "echo split-args-ok"
+drive "$T/on.bot" "$T/ws"
+check "streaming: tool call arguments split over chunks are joined" "$T/rec/tool.txt" "split-args-ok"
+check "streaming: provider extras in tool calls are kept (Gemini thought_signature)" "$T/rec/calls.txt" "sig-0"
+check "user view: a tool shows what it does in plain words" "$T/out" "Running a command"
+check_not "user view: tool names are not shown" "$T/out" "shell_exec"
+stub_start --think --nostream
+drive "$T/on.bot" "$T/ws"
+check "streaming: an endpoint that refuses streams still works (plain fallback)" "$T/out" "Hello there, streamed reply\\."
+check "streaming: the fallback request is plain" "$T/rec/stream.txt" "^plain"
+check_not "streaming fallback: reasoning is not printed" "$T/out" "pondering|<think>"
+
 # Session key cache (kernel keyring, own namespace): 2nd run reconnects without asking
 if [ -r /proc/keys ]; then
     shell_call "python3 -c \"import ctypes,os;l=ctypes.CDLL(None,use_errno=True);r=l.syscall(250,0,0,0,0,0);print('KEYCTL',r,os.strerror(ctypes.get_errno()))\""
@@ -309,6 +327,23 @@ if command -v tmux >/dev/null 2>&1; then
     check "TUI: the model is told what the numbers mean" "$T/rec/system.txt" "numbers each user message and your reply"
     check_not "TUI: header is gone after the first message" "$T/tui.txt" "the agent that builds agents"
     if head -3 "$T/tui.txt" | grep -q "first message"; then pass "TUI: the first message is at the top"; else fail "TUI: the first message is at the top"; fi
+
+    # TUI after a tool call: streamed reply shown once, tool internals hidden
+    tool_call shell_exec '{"command":"echo hi"}'
+    tmux new-session -d -s botter-test -x 100 -y 30 -c "$T/ws" "env BOTTER_THEME=dark $BOTTER"
+    sleep 0.8
+    for k in 6 Enter "http://127.0.0.1:$PORT/v1" Enter Enter stub Enter; do
+        tmux send-keys -t botter-test "$k"
+        sleep 0.3
+    done
+    sleep 0.8
+    tmux send-keys -t botter-test "run it" Enter
+    sleep 1.5
+    tmux capture-pane -t botter-test -p >"$T/tui.txt"
+    tmux kill-session -t botter-test 2>/dev/null
+    n=$(grep -c "^ *done *$" "$T/tui.txt")
+    if [ "$n" -eq 1 ]; then pass "TUI: a streamed reply is shown once"; else fail "TUI: a streamed reply is shown once" "seen $n times"; fi
+    check_not "TUI: tool names are hidden unless ctrl+o" "$T/tui.txt" "shell_exec"
 else
     skip "Ctrl-C test" "tmux not installed"
 fi

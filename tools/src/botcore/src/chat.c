@@ -85,7 +85,8 @@ void chat_switch(chat_t *c, chat_t *from)
     c->key = from->key;
     c->model = from->model;
     from->base = from->key = from->model = NULL;
-    c->thoughts = c->ev_cb && strstr(c->base, "generativelanguage.googleapis.com") != NULL;
+    c->thoughts = c->ev_cb && c->want_thoughts && strstr(c->base, "generativelanguage.googleapis.com") != NULL;
+    c->no_stream = 0;
     chat_free(from);
 }
 
@@ -292,11 +293,12 @@ void chat_set_tools(chat_t *c, cJSON *tools, char *(*cb)(void *, const char *, c
     c->tool_ud = ud;
 }
 
-void chat_set_events(chat_t *c, void (*cb)(void *, int, const char *), void *ud)
+void chat_set_events(chat_t *c, void (*cb)(void *, int, const char *), void *ud, int thoughts)
 {
     c->ev_cb = cb;
     c->ev_ud = ud;
-    c->thoughts = cb && strstr(c->base, "generativelanguage.googleapis.com") != NULL;
+    c->want_thoughts = thoughts;
+    c->thoughts = cb && thoughts && strstr(c->base, "generativelanguage.googleapis.com") != NULL;
 }
 
 /*
@@ -343,6 +345,280 @@ static void report_thoughts(chat_t *c, const cJSON *msg, char *text)
             found = 1;
         }
     }
+}
+
+/* ---- streaming (Server-Sent Events) ------------------------------------ */
+
+typedef struct {
+    char  *p;
+    size_t len, cap;
+} buf_t;
+
+static int buf_add(buf_t *b, const char *s, size_t n)
+{
+    if (b->len + n + 1 > b->cap) {
+        size_t nc = b->cap ? b->cap * 2 : 256;
+        while (nc < b->len + n + 1) {
+            nc *= 2;
+        }
+        char *np = realloc(b->p, nc);
+        if (!np) {
+            return -1;
+        }
+        b->p = np;
+        b->cap = nc;
+    }
+    memcpy(b->p + b->len, s, n);
+    b->len += n;
+    b->p[b->len] = '\0';
+    return 0;
+}
+
+static void buf_cut(buf_t *b, size_t n) /* drop the first n bytes */
+{
+    memmove(b->p, b->p + n, b->len - n + 1);
+    b->len -= n;
+}
+
+typedef struct {
+    chat_t *c;
+    buf_t   line;    /* SSE bytes not yet split into lines */
+    buf_t   text;    /* answer text without reasoning */
+    buf_t   pend;    /* content not yet classified as text or reasoning */
+    int     tstate;  /* 0 = before any text (a <think> block may start), 1 = inside one, 2 = text */
+    char    close[16];
+    cJSON  *calls;   /* tool calls assembled from deltas */
+    char   *err;     /* error object sent in the stream */
+    int     events;  /* data: lines seen */
+} stream_t;
+
+static void emit(stream_t *s, int kind, const char *p, size_t n)
+{
+    if (!n) {
+        return;
+    }
+    if (kind == CHAT_EV_TEXT_DELTA) {
+        buf_add(&s->text, p, n);
+    }
+    if (s->c->ev_cb) {
+        char *t = strndup(p, n);
+        if (t) {
+            s->c->ev_cb(s->c->ev_ud, kind, t);
+            free(t);
+        }
+    }
+}
+
+/*
+ * Content pieces -> text or reasoning: leading <think>/<thinking>/<thought>
+ * blocks are reasoning (as report_thoughts does for whole messages). Only with
+ * an event callback; otherwise everything is text.
+ */
+static void feed_content(stream_t *s, const char *p, size_t n, int final)
+{
+    static const char *const tags[] = {"think", "thinking", "thought"};
+    buf_add(&s->pend, p, n);
+    while (s->pend.len) {
+        if (s->tstate == 2 || !s->c->ev_cb) {
+            emit(s, CHAT_EV_TEXT_DELTA, s->pend.p, s->pend.len);
+            buf_cut(&s->pend, s->pend.len);
+            s->tstate = 2;
+        } else if (s->tstate == 1) {
+            char *e = strstr(s->pend.p, s->close);
+            if (e) {
+                emit(s, CHAT_EV_THINK_DELTA, s->pend.p, (size_t)(e - s->pend.p));
+                buf_cut(&s->pend, (size_t)(e - s->pend.p) + strlen(s->close));
+                s->tstate = 0;
+                continue;
+            }
+            size_t keep = final ? 0 : strlen(s->close) - 1; /* the close tag may be split */
+            if (s->pend.len > keep) {
+                emit(s, CHAT_EV_THINK_DELTA, s->pend.p, s->pend.len - keep);
+                buf_cut(&s->pend, s->pend.len - keep);
+            }
+            return;
+        } else {
+            size_t ws = strspn(s->pend.p, " \n\r\t");
+            const char *q = s->pend.p + ws;
+            size_t ql = s->pend.len - ws;
+            int prefix = 0, hit = 0;
+            for (size_t i = 0; i < 3 && !hit; i++) {
+                char open[16];
+                size_t ol = (size_t)snprintf(open, sizeof(open), "<%s>", tags[i]);
+                if (ql >= ol && strncmp(q, open, ol) == 0) {
+                    snprintf(s->close, sizeof(s->close), "</%s>", tags[i]);
+                    buf_cut(&s->pend, ws + ol);
+                    s->tstate = 1;
+                    hit = 1;
+                } else if (ql < ol && strncmp(q, open, ql) == 0) {
+                    prefix = 1;
+                }
+            }
+            if (hit) {
+                continue;
+            }
+            if ((prefix || ql == 0) && !final) {
+                return; /* undecided: wait for more */
+            }
+            s->tstate = 2;
+        }
+    }
+}
+
+/* Merge one streamed tool-call piece into s->calls (by "index", else by "id"). */
+static void merge_call(stream_t *s, const cJSON *d)
+{
+    const cJSON *ix = cJSON_GetObjectItemCaseSensitive(d, "index");
+    const cJSON *id = cJSON_GetObjectItemCaseSensitive(d, "id");
+    int n = cJSON_GetArraySize(s->calls), slot = -1;
+    if (cJSON_IsNumber(ix)) {
+        for (int i = 0; i < n; i++) {
+            const cJSON *si = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(s->calls, i), "index");
+            if (cJSON_IsNumber(si) && si->valueint == ix->valueint) {
+                slot = i;
+            }
+        }
+    } else if (cJSON_IsString(id) && *id->valuestring) {
+        for (int i = 0; i < n; i++) {
+            const cJSON *si = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(s->calls, i), "id");
+            if (cJSON_IsString(si) && strcmp(si->valuestring, id->valuestring) == 0) {
+                slot = i;
+            }
+        }
+    } else if (n) {
+        slot = n - 1;
+    }
+    if (slot < 0) {
+        cJSON_AddItemToArray(s->calls, cJSON_Duplicate(d, 1));
+        return;
+    }
+    cJSON *t = cJSON_GetArrayItem(s->calls, slot);
+    for (const cJSON *f = d->child; f; f = f->next) {
+        if (strcmp(f->string, "function") != 0) {
+            cJSON_DeleteItemFromObjectCaseSensitive(t, f->string); /* id, type, extra_content: latest wins */
+            cJSON_AddItemToObject(t, f->string, cJSON_Duplicate(f, 1));
+            continue;
+        }
+        cJSON *tf = cJSON_GetObjectItemCaseSensitive(t, "function");
+        if (!cJSON_IsObject(tf)) {
+            cJSON_DeleteItemFromObjectCaseSensitive(t, "function");
+            cJSON_AddItemToObject(t, "function", cJSON_Duplicate(f, 1));
+            continue;
+        }
+        const cJSON *nm = cJSON_GetObjectItemCaseSensitive(f, "name");
+        const cJSON *ar = cJSON_GetObjectItemCaseSensitive(f, "arguments");
+        cJSON *tn = cJSON_GetObjectItemCaseSensitive(tf, "name");
+        if (cJSON_IsString(nm) && *nm->valuestring && !(cJSON_IsString(tn) && *tn->valuestring)) {
+            cJSON_DeleteItemFromObjectCaseSensitive(tf, "name");
+            cJSON_AddStringToObject(tf, "name", nm->valuestring);
+        }
+        if (cJSON_IsString(ar) && *ar->valuestring) {
+            cJSON *ta = cJSON_GetObjectItemCaseSensitive(tf, "arguments");
+            const char *old = cJSON_IsString(ta) ? ta->valuestring : "";
+            char *cat = malloc(strlen(old) + strlen(ar->valuestring) + 1);
+            if (cat) {
+                strcpy(cat, old);
+                strcat(cat, ar->valuestring);
+                cJSON_DeleteItemFromObjectCaseSensitive(tf, "arguments");
+                cJSON_AddStringToObject(tf, "arguments", cat);
+                free(cat);
+            }
+        }
+    }
+}
+
+static void on_sse_event(stream_t *s, const char *data)
+{
+    if (strcmp(data, "[DONE]") == 0) {
+        return;
+    }
+    cJSON *j = cJSON_Parse(data);
+    if (!j) {
+        return;
+    }
+    s->events++;
+    const cJSON *e = cJSON_GetObjectItemCaseSensitive(j, "error");
+    if (e && !s->err) {
+        char *t = cJSON_PrintUnformatted(e);
+        s->err = t ? t : strdup("error in stream");
+    }
+    const cJSON *ch = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(j, "choices"), 0);
+    const cJSON *d = cJSON_GetObjectItemCaseSensitive(ch, "delta");
+    const char *rf[] = {"reasoning_content", "reasoning"};
+    for (size_t i = 0; i < 2; i++) {
+        const cJSON *r = cJSON_GetObjectItemCaseSensitive(d, rf[i]);
+        if (cJSON_IsString(r) && *r->valuestring) {
+            emit(s, CHAT_EV_THINK_DELTA, r->valuestring, strlen(r->valuestring));
+            break;
+        }
+    }
+    const cJSON *ct = cJSON_GetObjectItemCaseSensitive(d, "content");
+    if (cJSON_IsString(ct) && *ct->valuestring) {
+        feed_content(s, ct->valuestring, strlen(ct->valuestring), 0);
+    }
+    const cJSON *tc;
+    cJSON_ArrayForEach(tc, cJSON_GetObjectItemCaseSensitive(d, "tool_calls"))
+    {
+        merge_call(s, tc);
+    }
+    cJSON_Delete(j);
+}
+
+/* http_request_stream callback: split into lines, handle "data:" lines. */
+static void on_sse_bytes(void *ud, const char *p, size_t n)
+{
+    stream_t *s = ud;
+    buf_add(&s->line, p, n);
+    char *nl;
+    while (s->line.p && (nl = memchr(s->line.p, '\n', s->line.len))) {
+        *nl = '\0';
+        if (nl > s->line.p && nl[-1] == '\r') {
+            nl[-1] = '\0';
+        }
+        if (strncmp(s->line.p, "data:", 5) == 0) {
+            on_sse_event(s, s->line.p + 5 + (s->line.p[5] == ' '));
+        }
+        buf_cut(&s->line, (size_t)(nl - s->line.p) + 1);
+    }
+}
+
+/* After the stream: the assembled message as a non-streaming response {"choices":[{"message":...}]}. */
+static cJSON *stream_result(stream_t *s)
+{
+    if (s->line.len && strncmp(s->line.p, "data:", 5) == 0) { /* last line without '\n' */
+        on_sse_event(s, s->line.p + 5 + (s->line.p[5] == ' '));
+    }
+    feed_content(s, "", 0, 1);
+    cJSON *msg = cJSON_CreateObject();
+    cJSON_AddStringToObject(msg, "role", "assistant");
+    if (s->text.len || !cJSON_GetArraySize(s->calls)) {
+        cJSON_AddStringToObject(msg, "content", s->text.p ? s->text.p : "");
+    } else {
+        cJSON_AddNullToObject(msg, "content");
+    }
+    if (cJSON_GetArraySize(s->calls)) {
+        cJSON *tc;
+        cJSON_ArrayForEach(tc, s->calls)
+        {
+            cJSON_DeleteItemFromObjectCaseSensitive(tc, "index");
+        }
+        cJSON_AddItemToObject(msg, "tool_calls", s->calls);
+        s->calls = NULL;
+    }
+    cJSON *j = cJSON_CreateObject();
+    cJSON *ch = cJSON_CreateObject();
+    cJSON_AddItemToObject(ch, "message", msg);
+    cJSON_AddItemToArray(cJSON_AddArrayToObject(j, "choices"), ch);
+    return j;
+}
+
+static void stream_free(stream_t *s)
+{
+    free(s->line.p);
+    free(s->text.p);
+    free(s->pend.p);
+    free(s->err);
+    cJSON_Delete(s->calls);
 }
 
 /* Append a tool-role result message. */
@@ -416,6 +692,10 @@ int chat_send(chat_t *c, const char *user, char **reply, char **err)
         if (c->tools && cJSON_GetArraySize(c->tools) > 0) {
             cJSON_AddItemReferenceToObject(root, "tools", c->tools);
         }
+        int streaming = c->ev_cb && !c->no_stream;
+        if (streaming) {
+            cJSON_AddTrueToObject(root, "stream");
+        }
         if (c->thoughts) {
             cJSON *eb = cJSON_AddObjectToObject(root, "extra_body");
             cJSON *tc = cJSON_AddObjectToObject(cJSON_AddObjectToObject(eb, "google"), "thinking_config");
@@ -428,27 +708,47 @@ int chat_send(chat_t *c, const char *user, char **reply, char **err)
             goto fail;
         }
 
-        int rc = http_request(url, c->key, body, CHAT_TIMEOUT_S, &r);
+        stream_t st = {.c = c, .calls = cJSON_CreateArray()};
+        int rc = streaming ? http_request_stream(url, c->key, body, CHAT_TIMEOUT_S, on_sse_bytes, &st, &r)
+                           : http_request(url, c->key, body, CHAT_TIMEOUT_S, &r);
         free(body);
         if (rc != HTTP_OK) {
             ret = transport_error(rc, &r, err);
             http_resp_free(&r);
+            stream_free(&st);
             goto fail;
         }
-        if (r.status == 400 && c->thoughts) {
-            c->thoughts = 0; /* endpoint refused extra_body: retry without it */
+        if (r.status == 400 && (c->thoughts || streaming)) {
+            /* endpoint refused extra_body, then "stream": retry without it */
+            if (c->thoughts) {
+                c->thoughts = 0;
+            } else {
+                c->no_stream = 1;
+            }
             http_resp_free(&r);
+            stream_free(&st);
             round--;
             continue;
+        }
+        if (st.err) {
+            *err = st.err;
+            st.err = NULL;
+            http_resp_free(&r);
+            stream_free(&st);
+            goto fail;
         }
         if (r.status < 200 || r.status >= 300) {
             *err = error_text(r.status, r.body);
             ret = (r.status == 401 || r.status == 403) ? CHAT_ERR_AUTH : CHAT_ERR_OTHER;
             http_resp_free(&r);
+            stream_free(&st);
             goto fail;
         }
 
-        cJSON *j = cJSON_Parse(r.body);
+        /* A streamed answer is assembled into the shape of a plain one; an endpoint
+         * that ignored "stream" sent plain JSON, parsed as before. */
+        cJSON *j = streaming && st.events ? stream_result(&st) : cJSON_Parse(r.body);
+        stream_free(&st);
         http_resp_free(&r);
         cJSON *ch = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(j, "choices"), 0);
         cJSON *msg = cJSON_GetObjectItemCaseSensitive(ch, "message");

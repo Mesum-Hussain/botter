@@ -402,15 +402,53 @@ static int connect_flow(chat_t *c)
     }
 }
 
-/* Runs between a tool call being requested and executed: show it, then run it. */
+/* What the user sees while a tool runs: what it does, not the function name. */
+static const char *tool_status(const char *name)
+{
+    static const char *const M[][2] = {
+        {"fs_read", "Reading files"},         {"fs_list", "Looking through files"},
+        {"fs_write", "Writing a file"},       {"shell_exec", "Running a command"},
+        {"vfs_read", "Reading instructions"}, {"vfs_list", "Reading instructions"},
+        {"get_time", "Checking the time"},    {"cron_set", "Scheduling a task"},
+        {"cron_list", "Checking schedules"},  {"cron_delete", "Removing a schedule"},
+    };
+    for (size_t i = 0; i < sizeof(M) / sizeof(M[0]); i++) {
+        if (strcmp(M[i][0], name) == 0) {
+            return M[i][1];
+        }
+    }
+    const ext_tool_t *x = ext_find(name);
+    return x && ext_status(x) ? ext_status(x) : "Working";
+}
+
+static int g_details; /* REPL /details: show tool calls as they are (developers) */
+static int g_open;    /* REPL: streamed answer text is on the current line */
+
+/* REPL: end a streamed line before printing anything else. */
+static void close_stream_line(void)
+{
+    if (g_open) {
+        fputs("\n", stdout);
+        g_open = 0;
+    }
+}
+
+/* Runs between a tool call being requested and executed: show what happens, then run it. */
 static char *on_tool(void *ud, const char *name, const char *args)
 {
     (void)ud;
+    const char *st = tool_status(name);
     if (front_active()) {
-        front_event("tool", "name", name, "args", args, (char *)NULL);
+        front_event("tool", "name", name, "args", args, "status", st, (char *)NULL);
         char *res = tools_call(name, args);
         front_event("tool_result", "text", res ? res : "ERROR: tool failed", (char *)NULL);
         return res;
+    }
+    close_stream_line();
+    if (!g_details) {
+        printf(ANSI_DIM "  · %s" ANSI_RESET "\n", st);
+        fflush(stdout);
+        return tools_call(name, args);
     }
     char shown[161];
     size_t n = 0;
@@ -424,11 +462,35 @@ static char *on_tool(void *ud, const char *name, const char *args)
     return tools_call(name, args);
 }
 
-/* Frontend mode only: reasoning and interim text from the model. */
+/* Reasoning and text from the model as it arrives (streamed), or whole when the endpoint does not stream. */
 static void on_chat_event(void *ud, int kind, const char *text)
 {
     (void)ud;
-    front_event(kind == CHAT_EV_THINKING ? "thinking" : "text", "text", text, (char *)NULL);
+    if (front_active()) {
+        if (kind == CHAT_EV_TEXT_DELTA || kind == CHAT_EV_THINK_DELTA) {
+            front_event("delta", "kind", kind == CHAT_EV_TEXT_DELTA ? "text" : "thinking", "text", text, (char *)NULL);
+        } else {
+            front_event(kind == CHAT_EV_THINKING ? "thinking" : "text", "text", text, (char *)NULL);
+        }
+        return;
+    }
+    /* Plain REPL: reasoning is not shown; text is printed as it arrives. */
+    if (kind == CHAT_EV_TEXT_DELTA) {
+        if (!g_open) {
+            fputs(PROMPT_AGENT, stdout);
+            g_open = 1;
+        }
+        term_print_clean(text);
+        fflush(stdout);
+    } else if (kind == CHAT_EV_TEXT) { /* interim text before tool calls */
+        if (g_open) {
+            close_stream_line();
+        } else {
+            fputs(PROMPT_AGENT, stdout);
+            term_print_clean(text);
+            fputs("\n", stdout);
+        }
+    }
 }
 
 static int g_last_dropped;
@@ -484,6 +546,10 @@ static void run_turn(chat_t *chat, const char *text)
     }
     if (r == CHAT_OK && front_active()) {
         front_event("reply", "text", reply, (char *)NULL);
+    } else if (r == CHAT_OK && g_open) { /* already streamed */
+        g_open = 0;
+        fputs("\n\n", stdout);
+        fflush(stdout);
     } else if (r == CHAT_OK) {
         fputs(PROMPT_AGENT, stdout);
         if (*reply) {
@@ -494,8 +560,10 @@ static void run_turn(chat_t *chat, const char *text)
         fputs("\n\n", stdout);
         fflush(stdout);
     } else if (r == CHAT_ERR_ABORT) {
+        close_stream_line();
         puts("(interrupted)\n");
     } else {
+        close_stream_line();
         say_err(r == CHAT_ERR_AUTH ? "authentication failed" : "request failed", err);
         fputs("\n", stderr);
     }
@@ -565,9 +633,7 @@ int main(int argc, char **argv)
         ext_allow_network(net_ok);
     }
     chat_set_tools(&chat, tools_schema(), on_tool, NULL);
-    if (front_active()) {
-        chat_set_events(&chat, on_chat_event, NULL);
-    }
+    chat_set_events(&chat, on_chat_event, NULL, front_active()); /* streaming; reasoning only in the UI */
 
     static const char FIXED[] =
         "You can use tools to read/write files, run shell commands and schedule tasks. "
@@ -698,6 +764,13 @@ int main(int argc, char **argv)
             free(in);
             continue;
         }
+        if (strcmp(line, "/details") == 0) {
+            g_details = !g_details;
+            puts(g_details ? ANSI_DIM "Showing tool calls as they are" ANSI_RESET
+                           : ANSI_DIM "Showing what the agent does in plain words" ANSI_RESET);
+            free(in);
+            continue;
+        }
         if (strcmp(line, "/forget") == 0) {
             int n = ks_forget_all();
             printf(ANSI_DIM "Forgot %d saved entr%s (API keys, models, last provider). "
@@ -711,6 +784,7 @@ int main(int argc, char **argv)
                  "/build     Build mode: changes allowed (default)\n"
                  "/provider  switch provider, key or model (keeps the conversation)\n"
                  "/forget    remove saved API keys (they are kept in RAM until reboot)\n"
+                 "/details   show tool calls as they are (for developers)\n"
                  "/exit      quit" ANSI_RESET);
             free(in);
             continue;

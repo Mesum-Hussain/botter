@@ -58,7 +58,7 @@ OML has `set`, `if`/`elif`/`else`, `for … in`, `while`, `in parallel`, `retry 
 ## Development
 
 ```sh
-make test                 # 51 tests: stub LLM, sandbox, OML lint, HTTP client, Ctrl-C
+make test                 # 63 tests: stub LLM, sandbox, OML lint, HTTP client, Ctrl-C
 BOTTER_TEST_NET=1 make test   # adds real providers and TLS failure cases
 make dist                 # dist/botter-<version>-linux-x86_64.tar.gz + .sha256
 ```
