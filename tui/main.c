@@ -309,8 +309,7 @@ static int    g_expand;        /* ctrl+o: full thinking / tool output */
 static char  *g_model, *g_cwd;
 static int    g_scroll;        /* lines scrolled up from the bottom */
 static int    g_last_total = -1, g_last_cw = -1;
-static int    g_cell;          /* message number: one per chat message, shared by its reply */
-static int    g_out_pending;   /* the next agent block opens reply number g_cell */
+static int    g_cell;          /* message number: one per chat message (its reply is "the reply to n") */
 
 /* Left gutter holding the reference numbers (0 on very narrow screens: number on its own line). */
 static int gutter_w(int cw) { return cw >= 30 ? 6 : 0; }
@@ -335,12 +334,8 @@ static blk_t *blk_add(int kind)
     memset(b, 0, sizeof(*b));
     b->kind = kind;
     b->lw = -1;
-    if (kind == B_USER) {
+    if (kind == B_USER) { /* only messages are numbered; a reply belongs to the message above it */
         b->num = ++g_cell;
-        g_out_pending = 1;
-    } else if (g_out_pending && kind != B_ASK && kind != B_HEADER) {
-        b->num = g_cell;
-        g_out_pending = 0;
     }
     if (g_nb > 0) {
         int pk = g_b[g_nb - 1].kind;
