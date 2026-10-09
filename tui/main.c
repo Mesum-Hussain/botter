@@ -315,23 +315,11 @@ static int    g_out_pending;   /* the next agent block opens reply number g_cell
 /* Left gutter holding the reference numbers (0 on very narrow screens: number on its own line). */
 static int gutter_w(int cw) { return cw >= 30 ? 6 : 0; }
 
-/* Reference number as a circled digit (1-50: ① .. ⑳ ㉑ .. ㊿), "(n)" beyond; the colour tells
- * message from reply. ㉑ and up are double-width in terminals (tu_width agrees). */
+/* Reference number "(n)"; the colour tells message from reply. */
 static void gutter_label(char *out, size_t cap, int user, int num)
 {
     (void)user;
-    uint32_t cp = num >= 1 && num <= 20 ? 0x2460u + (uint32_t)(num - 1)
-                : num <= 35            ? 0x3251u + (uint32_t)(num - 21)
-                : num <= 50            ? 0x32B1u + (uint32_t)(num - 36)
-                                       : 0;
-    if (cp && cap >= 4) {
-        out[0] = (char)(0xE0 | (cp >> 12));
-        out[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
-        out[2] = (char)(0x80 | (cp & 0x3F));
-        out[3] = '\0';
-    } else {
-        snprintf(out, cap, "(%d)", num);
-    }
+    snprintf(out, cap, "(%d)", num);
 }
 
 static blk_t *blk_add(int kind)
