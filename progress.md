@@ -1,6 +1,6 @@
 # BOTCORE + BOTTER: SPEC + STATUS (AI-consumed; terse by design)
 
-Updated: 2026-10-09 | Phase: Ph4 done (in-process HTTPS, no curl); next: tests in repo | Lang: C11 | Target: x86_64 Linux, latest Fedora (dev: F44, kernel 7.2, SELinux enforcing, Landlock+userns on, musl-gcc)
+Updated: 2026-10-09 | Phase: tests in repo done (make test, 37 cases); next: detect truncated .bot | Lang: C11 | Target: x86_64 Linux, latest Fedora (dev: F44, kernel 7.2, SELinux enforcing, Landlock+userns on, musl-gcc)
 Legend: [D]=owner decided, [R]=recommendation (unapproved), [S]=spike needed, P0..P3=priority
 
 ## 1. PRODUCT [D]
@@ -53,7 +53,7 @@ botcore `tools/src/botcore/src` (~4K LOC): http.c (in-process HTTP/1.1: plain fo
 Botter (repo root is an agent project): agent.md, flow.md, manifest.md, skills/{create-agent,project-layout,write-agent-md-and-skills,write-tool,write-flow,wrap-existing-project,build-agent}, tools agent_manifest/agent_build/agent_inspect (one static ELF `tools/src/agent_tools`, includes packer). Skills enforce: no mocks, agent's own LLM does reasoning (no call_llm tools), stdin-JSON tools with declared parameters, test tools by hand.
 TUI `tui/` (main.c, lay.c, tui.h, logo.h): `make` bundles botter-tui + artifacts/botter.bot (trailer "BOTTUI01"), runs agent from memfd with BOTCORE_FRONTEND=1; non-tty/TERM=dumb/BOTTER_TUI=0 -> plain REPL. Look: terminal's own bg (nothing painted); sage palette 5C7057/89A482/ACC5A6/D1EDD3 light/dark set via OSC 11 (else COLORFGBG, else dark; BOTTER_THEME overrides); Jupyter-like gutter `In [n]:`/`Out[n]:`, user msg = tinted bordered cell, chat box = next In cell; markdown/code/tables, collapsible thinking/tools (ctrl+o), scrollback, mouse wheel, paste, history. Logo 11x13 muted head + neck (no crown/limbs/body).
 Build: `make` -> ./botter; `make tools|artifacts|tui|clean`; botcore `make release` = static musl ~330KB (BearSSL ~58KB, CA anchors ~59KB, musl resolver; was 170KB with curl). BearSSL built as obj*/libbearssl.a with its own flags. Needs gcc + musl-gcc. After botcore changes re-run `make`.
-Tested with stub OpenAI servers (scratchpad only): chat, tools, network modes, OML lint, TUI captures via tmux, Landlock (ctx/tmp write OK, $HOME write/list denied, ~/.local/bin tools run, approved path granted once, agent_build OK, offline netns+Landlock). NOT tested: real-LLM tool calling end to end, real Gemini thoughts.
+TESTS `make test` = tests/run.sh (temp dir, cleans up): stub_llm.py (OpenAI-compatible stub: tool/text/slow modes, free port, records system prompt + tool result), http_servers.py (origin: plain/chunked/POST echo; CONNECT proxy with Basic auth), http_client.c (http.c driver, built with musl). Cases: own project 0 warnings, OML lint (valid/missing ':'/indent/unfenced), tool loop, online/offline prompts + network, Landlock (ctx/tmp write, $HOME write/list denied), flow hint, no-PATH run, botter agent_build, HTTP plain/chunked/POST/407/bad URL/refused, Ctrl-C via tmux. BOTTER_TEST_NET=1 adds providers (Gemini/OpenAI/Groq/OpenRouter), badssl failures, HTTPS via proxy: 37/37 pass. Not covered: TUI rendering (checked manually via tmux captures), approved-path Landlock grant (needs y at a tty), real-LLM tool calling end to end.
 
 ## 8. ISSUES
 Resolved I1 (Ph4): no host curl. Limits: TLS 1.2 only (BearSSL has no 1.3; all presets fine); IP-literal HTTPS hosts fail name check; DNS (getaddrinfo) not interruptible by Ctrl-C; corporate MITM CAs unsupported (no custom CA option yet).
@@ -62,8 +62,8 @@ P2 memfd exec may be blocked by confined SELinux / vm.memfd_noexec (no fallback)
 
 ## 9. PLAN / NEXT
 (0) Owner: build the hackathon agents with ./botter + real LLM (problem 2: marketing agent on google-maps-scraper-kit, must work e2e from 2 inputs, model-agnostic, no mocks, opt-out + send caps); tune skills from failures. First attempt (marketbot) failed: argv tools, mock LLM tool -> fixed in skills.
-(a) [NEXT] Tests in repo (only scratchpad harnesses today: stub OpenAI servers, tmux captures, http test client). (b) Detect truncated .bot. (c) Ph6 release/size pass. Deferred: websearch tool, streaming, memory.
-Done: Ph4 in-process HTTPS (2026-10-09; verified vs Gemini/OpenAI/OpenRouter/Groq, badssl failure cases, local chunked/POST/proxy/abort); Ph3d Landlock + rlimits + key hardening; Ph5a-e botter, TUI, network mode, flow.md.
+(a) [NEXT] Detect truncated .bot (footer missing looks like plain botcore). (b) Ph6 release/size pass. Run `make test` after every change. Deferred: websearch tool, streaming, memory.
+Done: tests in repo (2026-10-09); Ph4 in-process HTTPS (2026-10-09; verified vs Gemini/OpenAI/OpenRouter/Groq, badssl failure cases, local chunked/POST/proxy/abort); Ph3d Landlock + rlimits + key hardening; Ph5a-e botter, TUI, network mode, flow.md.
 
 ## 10. AGENT RULES
 - Prefer editing over new files; update THIS file each session, keep terse. Never log keys; no new persistence.

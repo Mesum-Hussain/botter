@@ -5,6 +5,7 @@
 #   make tools      -> tools/bin/*  (static musl executables from tools/src/agent_tools)
 #   make artifacts  -> artifacts/botcore (static runtime) + artifacts/botter_pack (packer)
 #   make tui        -> tui/botter-tui (botter-only full-screen UI; agents built by botter never get it)
+#   make test       -> tests/run.sh (stub LLM, sandbox, OML lint, HTTP client; BOTTER_TEST_NET=1 adds internet tests)
 #   make clean
 #
 # Build-time only; none of this is embedded. Needs gcc and musl-gcc (Fedora: musl-gcc musl-libc-static).
@@ -56,9 +57,12 @@ $(TOOL_BINS): $(AGENT_TOOLS)
 	@mkdir -p tools/bin
 	cp $< $@
 
+test: botter
+	sh tests/run.sh
+
 clean:
 	rm -rf artifacts botter tools/bin $(AGENT_TOOLS)
 	$(MAKE) -C tui clean
 	$(MAKE) -C $(BOTCORE_DIR) clean
 
-.PHONY: tools artifacts tui clean
+.PHONY: tools artifacts tui test clean
