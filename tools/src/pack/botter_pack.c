@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -301,8 +302,8 @@ static int cmp_item(const void *a, const void *b)
 /*
  * OML v1 structure check for flow.md (warnings only: conditions and actions are
  * plain English, so only the shape is checked). Rules: the file starts with the
- * <!-- OML v1 ... --> description; the OML code sits in a ```oml fenced block
- * (so markdown keeps its indentation); 4-space indentation, no tabs; a line ending in
+ * <!-- OML v1 ... --> description; the OML code sits in a fenced block whose
+ * info string has the word "oml" (```python oml: editors highlight it as Python); 4-space indentation, no tabs; a line ending in
  * ':' opens a block whose body is indented exactly 4 more; if/elif/else/for/while
  * lines end in ':'; elif/else follow an unfinished if at the same depth;
  * for-lines read "for <item> in <collection>:".
@@ -338,7 +339,17 @@ static void oml_lint(const char *s, size_t n)
         while (q < e && s[q] == ' ') {
             q++;
         }
-        if (e - q >= 6 && (strncmp(s + q, "```oml", 6) == 0 || strncmp(s + q, "```OML", 6) == 0)) {
+        int oml_fence = 0; /* ``` + an info string containing the word "oml" (```oml, ```python oml) */
+        if (e - q >= 3 && strncmp(s + q, "```", 3) == 0) {
+            for (size_t w = q + 3; w + 3 <= e; w++) {
+                if ((w == q + 3 || s[w - 1] == ' ') && strncasecmp(s + w, "oml", 3) == 0 &&
+                    (w + 3 == e || s[w + 3] == ' ' || s[w + 3] == '\r')) {
+                    oml_fence = 1;
+                    break;
+                }
+            }
+        }
+        if (oml_fence) {
             size_t b = e < n ? e + 1 : n, c = b;
             while (c < n) {
                 size_t ce = c;
@@ -362,7 +373,7 @@ static void oml_lint(const char *s, size_t n)
         }
         p = e + 1;
     }
-    warn("flow.md: put the OML code inside a %s fenced block, or markdown will mangle its indentation", "```oml");
+    warn("flow.md: put the OML code inside a %s fenced block, or markdown will mangle its indentation", "```python oml");
     oml_lint_code(s, n, 0);
 }
 

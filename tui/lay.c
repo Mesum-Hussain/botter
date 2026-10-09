@@ -613,7 +613,7 @@ static void lay_inline(tlines_t *L, const char *s, size_t n, tsty_t base, int wi
 
 /* ---------------- code highlighting ---------------- */
 
-enum { LG_NONE, LG_C, LG_HASH, LG_DASH, LG_DIFF, LG_JSON, LG_MD };
+enum { LG_NONE, LG_C, LG_HASH, LG_DASH, LG_DIFF, LG_JSON, LG_MD, LG_OML };
 
 static int lang_of(const char *l, size_t n)
 {
@@ -656,6 +656,9 @@ static int lang_of(const char *l, size_t n)
     if (!strcmp(b, "md") || !strcmp(b, "markdown")) {
         return LG_MD;
     }
+    if (!strcmp(b, "oml")) {
+        return LG_OML;
+    }
     return LG_NONE;
 }
 
@@ -688,6 +691,111 @@ static int is_kw(const char *s, size_t n)
 
 static int id_char(char ch) { return isalnum((unsigned char)ch) || ch == '_' || (unsigned char)ch >= 0x80; }
 
+/*
+ * OML v1 (botter flow.md): structural keywords (set if elif else for in while
+ * return), directive phrases at the start of a statement (in parallel, retry N
+ * times, ask user, save state to), the variable after `set`, strings, numbers.
+ * Everything else is plain English.
+ */
+static int word_is(const char *s, size_t n, size_t i, const char *w)
+{
+    size_t wl = strlen(w);
+    return i + wl <= n && strncmp(s + i, w, wl) == 0 && (i + wl == n || !id_char(s[i + wl]));
+}
+
+static void oml_line(tcells_t *c, const char *s, size_t n)
+{
+    uint32_t B = T.code_bg;
+    tsty_t plain = sty_bg(T.text, B, 0), kw = sty_bg(T.kw, B, TA_BOLD), str = sty_bg(T.str, B, 0),
+           num = sty_bg(T.num, B, 0), dir = sty_bg(T.fn, B, TA_BOLD), var = sty_bg(T.info, B, 0),
+           mut = sty_bg(T.muted, B, 0);
+    size_t i = 0;
+    while (i < n && s[i] == ' ') {
+        i++;
+    }
+    tc_add(c, s, i, plain);
+    static const char *const STRUCT[] = {"set", "if", "elif", "else", "for", "while", "return", NULL};
+    static const char *const PHRASE[] = {"in parallel", "ask user", "save state to", NULL};
+    int is_set = 0, is_for = 0;
+    for (int k = 0; STRUCT[k]; k++) {
+        if (word_is(s, n, i, STRUCT[k])) {
+            size_t wl = strlen(STRUCT[k]);
+            tc_add(c, s + i, wl, kw);
+            is_set = k == 0;
+            is_for = k == 4;
+            i += wl;
+            break;
+        }
+    }
+    for (int k = 0; PHRASE[k] && i < n; k++) {
+        if (word_is(s, n, i, PHRASE[k])) {
+            size_t wl = strlen(PHRASE[k]);
+            tc_add(c, s + i, wl, dir);
+            i += wl;
+            break;
+        }
+    }
+    if (word_is(s, n, i, "retry")) { /* retry N times */
+        size_t j = i + 5;
+        while (j < n && (s[j] == ' ' || isalnum((unsigned char)s[j]))) {
+            j++;
+        }
+        tc_add(c, s + i, j - i, dir);
+        i = j;
+    }
+    if (is_set) { /* set <name> = */
+        size_t j = i;
+        while (j < n && s[j] == ' ') {
+            j++;
+        }
+        size_t k = j;
+        while (k < n && (id_char(s[k]) || s[k] == '.')) {
+            k++;
+        }
+        tc_add(c, s + i, j - i, plain);
+        tc_add(c, s + j, k - j, var);
+        i = k;
+    }
+    while (i < n) {
+        char ch = s[i];
+        /* a ' right after a letter is an apostrophe (the user's), not a string */
+        if (ch == '"' || (ch == '\'' && (i == 0 || !id_char(s[i - 1])))) {
+            size_t j = i + 1;
+            while (j < n && s[j] != ch) {
+                j++;
+            }
+            size_t end = j < n ? j + 1 : n;
+            tc_add(c, s + i, end - i, str);
+            i = end;
+        } else if (isdigit((unsigned char)ch) && (i == 0 || !id_char(s[i - 1]))) {
+            size_t j = i;
+            while (j < n && isdigit((unsigned char)s[j])) {
+                j++;
+            }
+            tc_add(c, s + i, j - i, num);
+            i = j;
+        } else if (id_char(ch)) {
+            size_t j = i;
+            while (j < n && id_char(s[j])) {
+                j++;
+            }
+            int k = (is_for && j - i == 2 && !strncmp(s + i, "in", 2)) || (j - i == 3 && !strncmp(s + i, "not", 3)) ||
+                    (j - i == 3 && !strncmp(s + i, "and", 3)) || (j - i == 2 && !strncmp(s + i, "or", 2)) ||
+                    (j - i == 2 && !strncmp(s + i, "is", 2));
+            tc_add(c, s + i, j - i, k ? kw : plain);
+            i = j;
+        } else if ((ch == ':' && i + 1 == n) || ch == '=') {
+            tc_add(c, s + i, 1, mut);
+            i++;
+        } else {
+            int l;
+            tu_decode(s + i, n - i, &l);
+            tc_add(c, s + i, (size_t)l, plain);
+            i += (size_t)l;
+        }
+    }
+}
+
 /* One source line -> cells. *blk: inside a C block comment. */
 static void code_line(tcells_t *c, const char *s, size_t n, int lang, int *blk)
 {
@@ -708,6 +816,10 @@ static void code_line(tcells_t *c, const char *s, size_t n, int lang, int *blk)
     }
     if (lang == LG_NONE || lang == LG_MD) {
         tc_add(c, s, n, plain);
+        return;
+    }
+    if (lang == LG_OML) {
+        oml_line(c, s, n);
         return;
     }
     size_t i = 0;
@@ -1067,6 +1179,14 @@ void lay_markdown(tlines_t *L, const char *md, int width)
             size_t langn = 0;
             while (lang + langn < e && !isspace((unsigned char)lang[langn]) && lang[langn] != '{') {
                 langn++;
+            }
+            /* "```python oml": highlighted as Python by GitHub/editors, as OML here */
+            for (const char *w = lang + langn; w + 3 <= e; w++) {
+                if (isspace((unsigned char)w[-1]) && !strncmp(w, "oml", 3) && (w + 3 == e || isspace((unsigned char)w[3]))) {
+                    lang = "oml";
+                    langn = 3;
+                    break;
+                }
             }
             size_t j = i + 1;
             while (j < nl) {

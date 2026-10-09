@@ -2,7 +2,7 @@
 
 # Botter Session Flow
 
-```oml
+```python oml
 read skills/create-agent/SKILL.md
 set request = the user's first message
 

@@ -29,7 +29,7 @@ Embedded: manifest.md agent.md agent.json flow.md skills/** tools/doc/** tools/b
 - `agent.json {"offline": true}` (invalid JSON => offline): children in empty netns (userns) else seccomp (blocks AF_INET/INET6/PACKET); guard denies curl/wget/pip/docker/git clone...; per-tool `"network": true` exception after startup y/N consent. Botter writes agent.json ONLY on explicit user request.
 - LLM calls are made by the botcore parent: never sandboxed, always work.
 ### 3b. flow.md / OML v1 [D 2026-10-09]
-- Owner-defined pseudo code (stand-in for LangGraph/n8n). File = verbatim `<!-- OML v1: ... -->` header (text in skills/write-flow) + `# Name` + ONE ```oml fenced block (fence keeps indentation in markdown).
+- Owner-defined pseudo code (stand-in for LangGraph/n8n). File = verbatim `<!-- OML v1: ... -->` header (text in skills/write-flow) + `# Name` + ONE ```python oml fenced block (fence keeps indentation; "python" = highlighting on GitHub/editors; lint + TUI key on the word "oml", TUI has its own OML highlighter).
 - Followed by the LLM (no engine); botcore appends FLOW_HINT to system prompt when flow.md exists; guards still enforce approvals/limits.
 - botter_pack oml_lint (warnings, fenced body only): missing header/fence/unclosed fence, tabs, indent%4, ':' opener needs +4 body, unexpected indent, if/elif/else/for/while need ':', elif/else need unfinished if, `for x in y:`.
 

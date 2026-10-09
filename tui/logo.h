@@ -1,4 +1,4 @@
-/* botter logo: 11x12 pixel art (the Botter mascot's head), muted toward the sage UI palette.
+/* botter logo: 11x13 pixel art (the Botter mascot's head and neck), muted toward the sage UI palette.
  * Each char is a key into LOGO_COLORS; '.' is transparent. Rendered with half blocks. */
 static const char *const LOGO_ROWS[] = {
     "..ccccccc..",
@@ -13,6 +13,7 @@ static const char *const LOGO_ROWS[] = {
     ".ABBBBBBBA.",
     "..DEFGHIJ..",
     "..DEFGHIJ..",
+    "....NNN....",
 };
 
 static const struct { char key; uint32_t rgb; } LOGO_COLORS[] = {
@@ -23,4 +24,5 @@ static const struct { char key; uint32_t rgb; } LOGO_COLORS[] = {
     {'y', 0xAE6F67}, {'z', 0x7FA7AE}, {'A', 0x9E625B}, {'B', 0x8AB3B5},
     {'C', 0x9A5650}, {'D', 0x8E5A55}, {'E', 0x97605A}, {'F', 0xA0675F},
     {'G', 0xAA6E66}, {'H', 0xB4756C}, {'I', 0xBE7C73}, {'J', 0xC8847A},
+    {'N', 0x7D5752},
 };
