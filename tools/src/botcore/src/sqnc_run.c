@@ -1010,12 +1010,13 @@ static int run_list(rt_t *r, sq_list *l)
     return failed && r->retry ? Q_FAIL : Q_OK;
 }
 
-int sqnc_run(sq_prog *prog, sq_io *io)
+int sqnc_run(sq_prog *prog, sq_io *io, const cJSON *config)
 {
     rt_t r;
     memset(&r, 0, sizeof(r));
     r.io = io;
     r.vars = cJSON_CreateObject();
+    set_var(&r, "config", config ? cJSON_Duplicate(config, 1) : cJSON_CreateObject());
     int rc = run_list(&r, &prog->top);
     cJSON_Delete(r.vars);
     free(r.notes);

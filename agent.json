@@ -1,9 +1,40 @@
 {
   "name": "botter",
+  "display_name": "Botter",
   "version": "0.1.0",
-  "description": "The agent that builds agents: describe one in plain English and Botter designs, writes, checks and builds it into a single Linux executable.",
-  "author": "Mesum Hussain",
+  "description": "The agent based framewrok for building agents or agent based compiler for agents: describe one in plain English and Botter designs, writes, checks and builds it into a single Linux executable.",
+  "keywords": [
+    "agents",
+    "llm",
+    "compiler",
+    "sqnc",
+    "cli",
+    "linux"
+  ],
+  "author": {
+    "name": "Mesum Hussain",
+    "url": "https://github.com/Mesum-Hussain"
+  },
   "license": "MIT",
   "homepage": "https://github.com/Mesum-Hussain/botter",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Mesum-Hussain/botter.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Mesum-Hussain/botter/issues"
+  },
+  "engines": {
+    "botcore": ">=0.1.0"
+  },
+  "requires": [
+    "git"
+  ],
+  "llm": {
+    "provider": "gemini",
+    "model": "gemini-3.1-flash-lite"
+  },
+  "mode": "build",
+  "autostart": true,
   "builder": true
 }

@@ -46,14 +46,14 @@ artifacts/botcore: $(wildcard $(BOTCORE_DIR)/src/*.c $(BOTCORE_DIR)/src/*.h)
 	@mkdir -p artifacts
 	cp $(BOTCORE_DIR)/botcore-static $@
 
-artifacts/botter_pack: $(PACK_DIR)/botter_pack.c $(BOTCORE_DIR)/src/sqnc.c $(BOTCORE_DIR)/src/sqnc.h $(CJSON)/cJSON.c
+artifacts/botter_pack: $(PACK_DIR)/botter_pack.c $(BOTCORE_DIR)/src/semver.h $(BOTCORE_DIR)/src/sqnc.c $(BOTCORE_DIR)/src/sqnc.h $(CJSON)/cJSON.c
 	@mkdir -p artifacts
 	musl-gcc -Os -static -std=gnu11 -Wall -Wextra -I$(CJSON) -ffunction-sections -fdata-sections -Wl,--gc-sections -o $@ $< $(CJSON)/cJSON.c -lm
 	strip $(STRIP_NOTES) $@
 
 AGENT_TOOLS = tools/src/agent_tools/agent_tools
 
-$(AGENT_TOOLS): tools/src/agent_tools/agent_tools.c $(PACK_DIR)/botter_pack.c $(BOTCORE_DIR)/src/sqnc.c $(BOTCORE_DIR)/src/sqnc.h $(CJSON)/cJSON.c
+$(AGENT_TOOLS): tools/src/agent_tools/agent_tools.c $(PACK_DIR)/botter_pack.c $(BOTCORE_DIR)/src/semver.h $(BOTCORE_DIR)/src/sqnc.c $(BOTCORE_DIR)/src/sqnc.h $(CJSON)/cJSON.c
 	musl-gcc -Os -static -std=gnu11 -Wall -Wextra -Wno-unused-function -Wno-format-truncation -I$(CJSON) -ffunction-sections -fdata-sections \
 		-Wl,--gc-sections -o $@ tools/src/agent_tools/agent_tools.c $(CJSON)/cJSON.c -lm
 	strip $(STRIP_NOTES) $@

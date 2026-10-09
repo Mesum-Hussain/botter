@@ -1,6 +1,7 @@
 #ifndef BC_SQNC_RUN_H
 #define BC_SQNC_RUN_H
 
+#include "cJSON.h"
 #include "sqnc.h"
 
 /*
@@ -29,6 +30,7 @@ typedef struct {
 #define SQ_DONE    0 /* ran to the end or RETURN */
 #define SQ_ABORTED 1 /* the user interrupted or quit */
 
-int sqnc_run(sq_prog *prog, sq_io *io);
+/* config: agent.json "config" (the flow's `config` variable), or NULL. */
+int sqnc_run(sq_prog *prog, sq_io *io, const cJSON *config);
 
 #endif

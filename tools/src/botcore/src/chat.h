@@ -18,6 +18,8 @@ typedef struct {
     int    thoughts; /* ask Gemini for its thoughts (cleared if the endpoint refuses) */
     int    want_thoughts; /* the UI shows reasoning (chat_set_events) */
     int    no_stream;     /* endpoint refused "stream": true; plain responses from now on */
+    double temperature;   /* agent.json llm.temperature; < 0 = the provider's default */
+    int    max_rounds;    /* tool rounds per turn (agent.json llm.max_tool_rounds), default CHAT_MAX_TOOL_ROUNDS */
 } chat_t;
 
 /* Events (only when an event callback is set; reasoning is then also kept out of the reply). */

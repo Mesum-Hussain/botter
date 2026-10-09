@@ -41,22 +41,45 @@ An agent is a folder of plain-text files. Botter writes them with you, and you c
 | `tools/bin/<name>` + `tools/doc/<name>.json` | Small programs the agent can run, and their description | A little code |
 | `agent.json` | Name, version, description, author, license, homepage, and settings such as `"offline": true` | Botter (you can edit it) |
 
-### agent.json: what the agent is
+### agent.json: the manifest
 
-Like `package.json` for an agent:
+Like `package.json`, but for an agent: who it is, what it needs, how it runs, and its settings.
 
 ```json
 {
   "name": "lead-outreach",
+  "display_name": "Lead Outreach",
   "version": "1.2.0",
   "description": "Finds local businesses that need your service and pitches each one, with your approval.",
-  "author": "Jane Doe",
+  "keywords": ["sales", "outreach"],
+  "author": "Jane Doe <jane@example.com>",
   "license": "MIT",
-  "homepage": "https://github.com/jane/lead-outreach"
+  "homepage": "https://github.com/jane/lead-outreach",
+  "repository": {"type": "git", "url": "https://github.com/jane/lead-outreach.git"},
+  "bugs": {"url": "https://github.com/jane/lead-outreach/issues"},
+
+  "engines": {"botcore": ">=0.1.0"},
+  "requires": ["python3"],
+
+  "llm": {"provider": "gemini", "model": "gemini-3.1-flash-lite", "temperature": 0.3, "max_tool_rounds": 25},
+  "mode": "build",
+  "autostart": true,
+  "offline": false,
+
+  "config": {"city": "Lahore", "max_leads": 20}
 }
 ```
 
-The build checks it: the version must be semantic (`MAJOR.MINOR.PATCH`), the name must be a valid identifier, and bad JSON or wrong types are errors. The agent shows its name and version when it starts and with `--version`, `botter_pack list` shows the metadata, and the agent itself knows its name and version if asked. Botter starts a new agent at `0.1.0` and bumps the version whenever it changes one. Settings live in the same file: `"offline": true` cuts the agent's tools off from the network.
+| Field | What it does |
+|---|---|
+| `name`, `display_name`, `version`, `description`, `keywords`, `author`, `contributors`, `license`, `homepage`, `repository`, `bugs` | The package. Shown at start-up, with `--version`, by `botter_pack list` and `agent_inspect`, and the agent knows it if asked. `version` is semver; Botter bumps it on every change. |
+| `engines.botcore` | A semver range (`>=0.1.0`, `^1.2.0`). The build checks it against the runtime it packs; an agent won't start on a botcore that doesn't match. |
+| `requires` | Programs the agent needs (`python3`, `git`). The build warns when a script tool's interpreter is missing from the list; the agent says at start-up which ones aren't installed. |
+| `llm` | The provider and model the agent is meant for (offered as the defaults when connecting), `temperature`, `max_tool_rounds`. Never a key: the build refuses one. |
+| `mode`, `autostart`, `offline` | Start in Build or Plan mode, run `SQNC.md` at start-up or only on `/run`, and cut the agent's tools off from the network. |
+| `config` | The agent's adjustable settings, instead of values hard-coded in skills or tools. The flow reads `` `config.city` `` (the build checks the field exists), tools get it all as `$AGENT_CONFIG`, and the model sees it too. Anything that looks like a secret is refused: agent.json ships inside the `.bot`. |
+
+The build validates all of it: bad JSON, wrong types, a bad name, version or range, secrets and unknown providers are errors; unknown keys and missing basics are warnings.
 
 ### Skills: how to do a task
 
@@ -206,7 +229,7 @@ The reference rows are the bare interpreters, before any agent framework is even
 ## Development
 
 ```sh
-make test                     # 89 tests: Sqnc compiler + interpreter + review, sandbox, streaming, key cache, Plan mode, HTTP, TUI
+make test                     # 120 tests: Sqnc compiler + interpreter + review, agent.json, sandbox, streaming, key cache, Plan mode, HTTP, TUI
 BOTTER_TEST_NET=1 make test   # adds real providers and TLS failure cases
 make dist                     # dist/botter-<version>-linux-x86_64.tar.gz + .sha256
 ```

@@ -998,6 +998,13 @@ void sq_free(sq_prog *p)
 
 #define SQ_MAXV 256
 
+static int (*g_has_config)(const char *field);
+
+void sq_check_config(int (*has_config)(const char *field))
+{
+    g_has_config = has_config;
+}
+
 typedef struct {
     sq_prog *p;
     int (*has_tool)(const char *);
@@ -1048,7 +1055,14 @@ static void sq_refs(sq_cs *c, int line, const char *s)
             return;
         }
         if (sq_ref(q + 1, (size_t)(e - q - 1), root)) {
-            if (sq_in(c->dead, c->ndead, root) && !sq_in(c->vars, c->nvars, root)) {
+            if (!strcmp(root, "config") && g_has_config && q[7] == '.') {
+                char field[65];
+                size_t fl = strspn(q + 8, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_");
+                snprintf(field, sizeof(field), "%.*s", (int)(fl < 64 ? fl : 64), q + 8);
+                if (!g_has_config(field)) {
+                    sq_diag(c->p, line, 1, "`config.%s`: agent.json \"config\" has no \"%s\"", field, field);
+                }
+            } else if (sq_in(c->dead, c->ndead, root) && !sq_in(c->vars, c->nvars, root)) {
                 sq_diag(c->p, line, 1, "`%s` only exists inside its FOR EACH loop", root);
             } else if (!sq_in(c->vars, c->nvars, root)) {
                 sq_diag(c->p, line, 1,
@@ -1175,6 +1189,7 @@ void sq_check(sq_prog *p, int (*has_tool)(const char *), int (*has_skill)(const 
     c->p = p;
     c->has_tool = has_tool;
     c->has_skill = has_skill;
+    sq_def(c, "config"); /* agent.json "config", always set */
     sq_check_list(c, &p->top);
     free(c);
 }

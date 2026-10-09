@@ -71,6 +71,8 @@ void sq_free(sq_prog *p);
 /* Build-time checks on a parsed program: tools and skills exist, LOAD before INVOKE,
  * variables set before use, result/skill_output/answer after their producers. */
 void sq_check(sq_prog *p, int (*has_tool)(const char *), int (*has_skill)(const char *));
+/* `config` (agent.json "config") is always set; with has_config, `config.x` must name a field it has. */
+void sq_check_config(int (*has_config)(const char *field));
 
 /* `ref` syntax: identifier then .field / [n] parts; root name into root[65]. */
 int  sq_ref(const char *s, size_t n, char root[65]);

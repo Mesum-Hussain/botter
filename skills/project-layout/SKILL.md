@@ -46,19 +46,39 @@ fs_list, fs_read, fs_write (files in the working directory), shell_exec (sandbox
 - It is free inside its working directory and asks the user before touching anything outside it or doing something destructive. The kernel enforces this for shell commands and tools (Landlock): writes only in the working directory, /tmp and package caches; the rest of $HOME is hidden unless the user approves a command that names the path.
 
 ## agent.json
-Every agent has one. The build checks it (bad JSON, wrong types, a bad name or version are errors), the agent prints its name and version at start-up and with --version, and agent_inspect shows it.
+The agent's manifest, like package.json: who it is, what it needs, how it runs, its settings. Every agent has one. The build checks it (bad JSON, wrong types or values are errors), the agent shows its name and version at start-up and with --version, and agent_inspect shows it all.
 
 {
   "name": "lead-outreach",
+  "display_name": "Lead Outreach",
   "version": "0.1.0",
   "description": "Finds local businesses that need the user's service and pitches each one, with approval.",
-  "author": "Jane Doe",
+  "keywords": ["sales", "outreach"],
+  "author": "Jane Doe <jane@example.com>",
   "license": "MIT",
-  "homepage": "https://github.com/jane/lead-outreach"
+  "homepage": "https://github.com/jane/lead-outreach",
+  "repository": {"type": "git", "url": "https://github.com/jane/lead-outreach.git"},
+  "bugs": {"url": "https://github.com/jane/lead-outreach/issues"},
+  "engines": {"botcore": ">=0.1.0"},
+  "requires": ["python3"],
+  "llm": {"provider": "gemini", "model": "gemini-3.1-flash-lite", "temperature": 0.3, "max_tool_rounds": 25},
+  "mode": "build",
+  "autostart": true,
+  "config": {"city": "Lahore", "max_leads": 20}
 }
 
-- name: lowercase letters, digits, - _ . (1-64); use the project folder's name.
-- version: semantic versioning MAJOR.MINOR.PATCH. A new agent starts at "0.1.0". When you change an existing agent, bump it before building: PATCH for fixes, MINOR for new abilities, MAJOR when it behaves differently for its users. Keep the other fields.
-- description: one sentence, what the agent does and for whom.
-- author, license, homepage: only what the user tells you (do not invent them); leave them out otherwise.
-- Settings: "offline": true only when the user asks for an offline agent (see write-tool, section Network). "builder": true is only for agents that build agents (Botter).
+Always write:
+- name: lowercase letters, digits, - _ . (1-64); the project folder's name. display_name: the spelling people see, if it differs.
+- version: MAJOR.MINOR.PATCH. A new agent starts at "0.1.0". When you change an existing agent, bump it before building: PATCH for fixes, MINOR for new abilities, MAJOR when it behaves differently for its users. Keep the other fields.
+- description: one sentence, what it does and for whom. keywords: a few words people would search for.
+- engines.botcore: ">=" + the botcore version the agent is built with (agent_build reports it); the agent refuses to start on an older runtime.
+- requires: every program the agent's tools or shell steps need on the machine (python3, node, git, ffmpeg ...). The build warns when a script tool's interpreter is missing from it; the agent warns at start-up when one is not installed.
+
+Only what the user tells you (never invent): author ("Name <email> (url)" or {"name", "email", "url"}), contributors, license, homepage, repository, bugs.
+
+Settings, only when needed:
+- llm: the provider (gemini, openai, openrouter, groq, ollama, custom + base_url) and model the agent is meant for (the user is offered them as defaults at start-up), temperature (0-2; lower = more predictable), max_tool_rounds (1-100, default 25). Never an API key: the user enters it at start-up.
+- config: the agent's adjustable settings (a city, limits, a tone, a folder name) instead of hard-coding them in skills or tools. The flow reads them as `config.city`; tools get the whole object as JSON in the environment variable AGENT_CONFIG; the model sees them too. NEVER secrets (keys, tokens, passwords): the build refuses them, because agent.json is inside the .bot for anyone to read. Tools that need a secret read it from an environment variable the user sets, and say so in agent.md.
+- mode: "plan" to start in read-only Plan mode (default "build").
+- autostart: false if SQNC.md should only run when the user types /run (default: it runs at start-up).
+- offline: true only when the user asks for an offline agent (see write-tool, section Network). builder: true is only for agents that build agents (Botter).

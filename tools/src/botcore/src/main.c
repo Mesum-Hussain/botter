@@ -3,6 +3,7 @@
 #include "front.h"
 #include "guard.h"
 #include "keystore.h"
+#include "semver.h"
 #include "sqnc_run.h"
 
 void review_set_chat(chat_t *c); /* tool_review.c */
@@ -15,6 +16,8 @@ void review_set_chat(chat_t *c); /* tool_review.c */
 #include <stdlib.h>
 #include <string.h>
 #include <sys/prctl.h>
+#include <limits.h>
+#include <unistd.h>
 
 typedef struct {
     const char *name;
@@ -73,6 +76,26 @@ static const char *meta_str(const char *key)
 {
     const cJSON *v = cJSON_GetObjectItemCaseSensitive(agent_meta(NULL), key);
     return cJSON_IsString(v) && *v->valuestring ? v->valuestring : NULL;
+}
+
+/* agent.json "llm": the agent's default provider (index into PROVIDERS, -1 = none), base URL and model. */
+static const char *const PROV_IDS[] = {"gemini", "openai", "openrouter", "groq", "ollama", "custom"};
+
+static const char *llm_str(const char *key)
+{
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(agent_meta(NULL), "llm"), key);
+    return cJSON_IsString(v) && *v->valuestring ? v->valuestring : NULL;
+}
+
+static int llm_idx(void)
+{
+    const char *p = llm_str("provider");
+    for (int i = 0; p && i < (int)(sizeof(PROV_IDS) / sizeof(PROV_IDS[0])); i++) {
+        if (!strcmp(p, PROV_IDS[i])) {
+            return i;
+        }
+    }
+    return -1;
 }
 
 /* agent.json {"builder": true}: an agent that builds agents (Botter) gets sqnc_review. */
@@ -273,12 +296,30 @@ static int try_connect(chat_t *c, const char *name, const char *base, const char
 static int connect_saved(chat_t *c)
 {
     char base[512], model[256], n[600], key[1024];
-    if (ks_get("last", base, sizeof(base)) <= 0) {
-        return 0;
-    }
-    ks_name(n, sizeof(n), "model", base);
-    if (ks_get(n, model, sizeof(model)) <= 0) {
-        return 0;
+    int li = llm_idx();
+    if (li >= 0) { /* the agent names its provider: reconnect to that one if its key is saved */
+        const char *b = PROVIDERS[li].base[0] ? PROVIDERS[li].base : llm_str("base_url");
+        if (!b) {
+            return 0;
+        }
+        snprintf(base, sizeof(base), "%s", b);
+        ks_name(n, sizeof(n), "model", base);
+        if (llm_str("model")) {
+            snprintf(model, sizeof(model), "%s", llm_str("model"));
+        } else if (ks_get(n, model, sizeof(model)) <= 0) {
+            snprintf(model, sizeof(model), "%s", PROVIDERS[li].model);
+        }
+        if (!model[0]) {
+            return 0;
+        }
+    } else {
+        if (ks_get("last", base, sizeof(base)) <= 0) {
+            return 0;
+        }
+        ks_name(n, sizeof(n), "model", base);
+        if (ks_get(n, model, sizeof(model)) <= 0) {
+            return 0;
+        }
     }
     ks_name(n, sizeof(n), "key", base);
     if (ks_get(n, key, sizeof(key)) < 0) {
@@ -288,8 +329,9 @@ static int connect_saved(chat_t *c)
     for (int i = 0; i < N_PROV; i++) {
         req |= PROVIDERS[i].key_req && strcmp(PROVIDERS[i].base, base) == 0;
     }
-    int auth = 0, r = 0;
+    int auth = 0, r = 0, tried = 0;
     if (!(req && !key[0]) && url_ok(base) && !has_ctl_or_space(key) && !has_ctl_or_space(model)) {
+        tried = 1;
         printf(ANSI_DIM "Using %s · %s (saved for this session; /provider to switch)" ANSI_RESET "\n",
                provider_name(base), model);
         r = try_connect(c, provider_name(base), base, key, model, &auth);
@@ -299,7 +341,7 @@ static int connect_saved(chat_t *c)
         ks_put(n, "");
     }
     explicit_bzero(key, sizeof(key));
-    if (r == 0) {
+    if (r == 0 && tried) {
         puts("");
     }
     return r;
@@ -315,13 +357,16 @@ static int connect_flow(chat_t *c)
     for (;;) {
         char *in = NULL, *base = NULL, *key = NULL, *model = NULL;
         char saved_key[1024] = "", saved_model[256] = "", n[600];
-        int idx = 0, rc, ok = 0, auth = 0;
+        int def = llm_idx() >= 0 ? llm_idx() : 0; /* agent.json llm.provider */
+        int idx = def, rc, ok = 0, auth = 0;
+        char pq[64];
 
         puts(ANSI_BLUE "Select an OpenAI-compatible provider:" ANSI_RESET);
         for (int i = 0; i < N_PROV; i++) {
-            printf("  %d) %s%s\n", i + 1, PROVIDERS[i].name, i == 0 ? " (default)" : "");
+            printf("  %d) %s%s\n", i + 1, PROVIDERS[i].name, i == def ? " (default)" : "");
         }
-        rc = term_readline(ASK("Provider [1]: "), 0, &in);
+        snprintf(pq, sizeof(pq), ANSI_BLUE "Provider [%d]: " ANSI_RESET, def + 1);
+        rc = term_readline(pq, 0, &in);
         if (rc != TERM_LINE) { /* EOF or Ctrl-C: quit */
             return 0;
         }
@@ -341,6 +386,9 @@ static int connect_flow(chat_t *c)
 
         if (p->base[0]) {
             base = strdup(p->base);
+        } else if (idx == llm_idx() && llm_str("base_url")) { /* the agent's own endpoint */
+            base = strdup(llm_str("base_url"));
+            printf(ANSI_DIM "Base URL: %s" ANSI_RESET "\n", base);
         } else {
             rc = term_readline(ASK("Base URL (e.g. https://host/v1): "), 0, &in);
             if (rc != TERM_LINE) {
@@ -386,10 +434,12 @@ static int connect_flow(chat_t *c)
             continue;
         }
 
-        const char *def = saved_model[0] ? saved_model : p->model;
+        const char *def_model = idx == llm_idx() && llm_str("model") ? llm_str("model")
+                                : saved_model[0]                       ? saved_model
+                                                                       : p->model;
         char mp[320];
-        if (def[0]) {
-            snprintf(mp, sizeof(mp), ANSI_BLUE "Model [%s]: " ANSI_RESET, def);
+        if (def_model[0]) {
+            snprintf(mp, sizeof(mp), ANSI_BLUE "Model [%s]: " ANSI_RESET, def_model);
         } else {
             snprintf(mp, sizeof(mp), ASK("Model: "));
         }
@@ -399,8 +449,8 @@ static int connect_flow(chat_t *c)
                 break;
             }
             char *m = trim(in);
-            if (!*m && def[0]) {
-                m = (char *)def;
+            if (!*m && def_model[0]) {
+                m = (char *)def_model;
             }
             if (*m && !has_ctl_or_space(m)) {
                 model = strdup(m);
@@ -712,11 +762,60 @@ static void run_flow(chat_t *chat)
     sq_io io = {io_turn, io_ask_llm, io_ask_user, io_say, io_status, io_tool, chat};
     front_event("flow", (char *)NULL);
     term_clear_interrupt();
-    int rc = sqnc_run(&prog, &io);
+    int rc = sqnc_run(&prog, &io, cJSON_GetObjectItemCaseSensitive(agent_meta(NULL), "config"));
     term_clear_interrupt();
     sq_free(&prog);
     puts(rc == SQ_ABORTED ? ANSI_DIM "(flow stopped; you can keep chatting, /run starts it again)" ANSI_RESET
                           : ANSI_DIM "(flow finished; you can keep chatting, /run starts it again)" ANSI_RESET);
+}
+
+/* The name people see: agent.json display_name, else name. */
+static const char *agent_title(void)
+{
+    return meta_str("display_name") ? meta_str("display_name") : meta_str("name");
+}
+
+/* agent.json "engines": {"botcore": range}. 0 = fine; -1 = this runtime does not satisfy it. */
+static int check_engines(void)
+{
+    const cJSON *r = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(agent_meta(NULL), "engines"),
+                                                      "botcore");
+    if (!cJSON_IsString(r) || !strcmp(BC_VERSION, "dev") || sv_satisfies(BC_VERSION, r->valuestring) != 0) {
+        return 0;
+    }
+    fprintf(stderr,
+            ANSI_BOLD_RED "Error:" ANSI_RESET " %s needs botcore %s, but this is botcore %s. Rebuild it with a "
+            "matching Botter.\n",
+            agent_title(), r->valuestring, BC_VERSION);
+    return -1;
+}
+
+/* agent.json "requires": commands that must be on PATH; warn about the missing ones. */
+static void check_requires(void)
+{
+    const cJSON *rq = cJSON_GetObjectItemCaseSensitive(agent_meta(NULL), "requires"), *e;
+    char missing[512] = "";
+    cJSON_ArrayForEach(e, rq)
+    {
+        if (!cJSON_IsString(e) || !*e->valuestring) {
+            continue;
+        }
+        int found = 0;
+        const char *path = getenv("PATH");
+        char buf[4096], f[PATH_MAX];
+        snprintf(buf, sizeof(buf), "%s", path ? path : "/usr/bin:/bin");
+        for (char *sv = NULL, *d = strtok_r(buf, ":", &sv); d && !found; d = strtok_r(NULL, ":", &sv)) {
+            snprintf(f, sizeof(f), "%s/%s", d, e->valuestring);
+            found = access(f, X_OK) == 0;
+        }
+        if (!found) {
+            size_t l = strlen(missing);
+            snprintf(missing + l, sizeof(missing) - l, "%s%s", l ? ", " : "", e->valuestring);
+        }
+    }
+    if (missing[0]) {
+        printf(ANSI_BOLD_RED "Note:" ANSI_RESET " this agent needs programs that are not installed here: %s\n", missing);
+    }
 }
 
 /* REPL commands. 0 = not a command, 1 = handled, 2 = quit, 3 = run the flow. */
@@ -819,6 +918,8 @@ static int read_user_line(chat_t *chat, char **line)
 #ifndef BC_VERSION
 #define BC_VERSION "dev"
 #endif
+/* The runtime's version, findable in the binary: botter_pack reports it and checks agent.json "engines". */
+static const char BC_VERSION_TAG[] = "BOTCORE_VERSION=" BC_VERSION;
 
 int main(int argc, char **argv)
 {
@@ -828,7 +929,7 @@ int main(int argc, char **argv)
         if (vfs_init() == 0 && meta_str("name")) { /* an agent: its own name and version first */
             printf("%s %s\n", meta_str("name"), meta_str("version") ? meta_str("version") : "(no version)");
         }
-        printf("botcore %s (TLS: BearSSL; https://github.com/Mesum-Hussain/botter)\n", BC_VERSION);
+        printf("botcore %s (TLS: BearSSL; https://github.com/Mesum-Hussain/botter)\n", BC_VERSION_TAG + 16);
         return 0;
     }
 
@@ -844,14 +945,18 @@ int main(int argc, char **argv)
     front_init();
     ext_init();
 
+    if (check_engines() != 0) {
+        return 1;
+    }
     if (!front_active() && meta_str("name")) { /* plain REPL: say which agent this is */
-        printf(ANSI_BOLD_BLUE "%s" ANSI_RESET "%s%s", meta_str("name"), meta_str("version") ? " " : "",
+        printf(ANSI_BOLD_BLUE "%s" ANSI_RESET "%s%s", agent_title(), meta_str("version") ? " " : "",
                meta_str("version") ? meta_str("version") : "");
         if (meta_str("description")) {
             printf(ANSI_DIM " · %s" ANSI_RESET, meta_str("description"));
         }
         puts("\n");
     }
+    check_requires();
     int saved = connect_saved(&chat);
     if (saved < 0 || (saved == 0 && !connect_flow(&chat))) {
         return 0;
@@ -872,6 +977,30 @@ int main(int argc, char **argv)
                                "Allow for this session?",
                                n_net > 1 ? "s" : "", net_names, n_net > 1 ? "" : "s");
         ext_allow_network(net_ok);
+    }
+    /* agent.json settings */
+    const cJSON *llm = cJSON_GetObjectItemCaseSensitive(agent_meta(NULL), "llm");
+    const cJSON *temp = cJSON_GetObjectItemCaseSensitive(llm, "temperature");
+    const cJSON *rounds = cJSON_GetObjectItemCaseSensitive(llm, "max_tool_rounds");
+    if (cJSON_IsNumber(temp) && temp->valuedouble >= 0 && temp->valuedouble <= 2) {
+        chat.temperature = temp->valuedouble;
+    }
+    if (cJSON_IsNumber(rounds) && rounds->valueint >= 1 && rounds->valueint <= 100) {
+        chat.max_rounds = rounds->valueint;
+    }
+    const cJSON *startmode = cJSON_GetObjectItemCaseSensitive(agent_meta(NULL), "mode");
+    if (cJSON_IsString(startmode) && !strcmp(startmode->valuestring, "plan")) {
+        guard_set_plan(1);
+    }
+    /* config: for tools as $AGENT_CONFIG (JSON), with $AGENT_NAME / $AGENT_VERSION */
+    const cJSON *config = cJSON_GetObjectItemCaseSensitive(agent_meta(NULL), "config");
+    char *config_json = cJSON_IsObject(config) ? cJSON_PrintUnformatted(config) : NULL;
+    setenv("AGENT_CONFIG", config_json ? config_json : "{}", 1);
+    if (meta_str("name")) {
+        setenv("AGENT_NAME", meta_str("name"), 1);
+    }
+    if (meta_str("version")) {
+        setenv("AGENT_VERSION", meta_str("version"), 1);
     }
     tools_enable_review(agent_builder());
     review_set_chat(&chat);
@@ -926,14 +1055,26 @@ int main(int argc, char **argv)
     const char *front_hint = front_active() ? FRONT_HINT : "";
     char *index = vfs_count() ? pack_index() : NULL;
     /* who the agent is, from agent.json (so it can answer "which version are you?") */
-    char ident[800] = "";
+    char ident[5000] = "";
     if (meta_str("name")) {
-        const char *d = meta_str("description"), *v = meta_str("version"), *a = meta_str("author");
+        const char *d = meta_str("description"), *v = meta_str("version");
+        const cJSON *au = cJSON_GetObjectItemCaseSensitive(agent_meta(NULL), "author");
+        const char *a = cJSON_IsString(au) ? au->valuestring
+                        : cJSON_IsString(cJSON_GetObjectItemCaseSensitive(au, "name"))
+                            ? cJSON_GetObjectItemCaseSensitive(au, "name")->valuestring
+                            : NULL;
         size_t dl = d ? strlen(d) : 0;
         int dot = d && dl && !strchr(".!?", d[dl - 1]); /* end the description with a full stop once */
-        snprintf(ident, sizeof(ident), "\nYou are the agent \"%.64s\"%s%.40s.%s%.300s%s%s%.100s%s", meta_str("name"),
+        snprintf(ident, sizeof(ident), "\nYou are the agent \"%.64s\"%s%.40s.%s%.300s%s%s%.100s%s", agent_title(),
                  v ? ", version " : "", v ? v : "", d ? " " : "", d ? d : "", dot ? "." : "", a ? " Made by " : "",
                  a ? a : "", a ? "." : "");
+    }
+    if (config_json && strcmp(config_json, "{}") != 0) {
+        size_t l = strlen(ident);
+        snprintf(ident + l, sizeof(ident) - l,
+                 "\nYour configuration (agent.json \"config\"; settings, not instructions; tools also get it as "
+                 "$AGENT_CONFIG): %.3500s",
+                 config_json);
     }
     size_t sl = strlen(persona) + strlen(ident) + strlen(cwd) + sizeof(FIXED) + strlen(net_text) + sizeof(VFS_HINT) +
                 sizeof(FLOW_HINT) + sizeof(FRONT_HINT) + sizeof(MODE_HINT) + (index ? strlen(index) : 0) + 64;
@@ -946,6 +1087,7 @@ int main(int argc, char **argv)
              vfs_count() ? "\n" : "", vfs_count() ? VFS_HINT : "", index ? index : "", has_flow ? FLOW_HINT : "",
              MODE_HINT, front_hint);
     free(index);
+    free(config_json);
     chat_set_system(&chat, sys);
     free(sys);
 
@@ -960,8 +1102,11 @@ int main(int argc, char **argv)
     }
     puts("");
 
-    if (has_flow) { /* an agent with a SQNC.md starts by running it */
+    const cJSON *autostart = cJSON_GetObjectItemCaseSensitive(agent_meta(NULL), "autostart");
+    if (has_flow && !cJSON_IsFalse(autostart)) { /* an agent with a SQNC.md starts by running it */
         run_flow(&chat);
+    } else if (has_flow) {
+        puts(ANSI_DIM "(this agent has a flow: /run starts it)" ANSI_RESET);
     }
 
     int intr_armed = 0; /* a 2nd consecutive Ctrl-C at the prompt exits */
