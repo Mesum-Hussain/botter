@@ -309,17 +309,16 @@ static int    g_expand;        /* ctrl+o: full thinking / tool output */
 static char  *g_model, *g_cwd;
 static int    g_scroll;        /* lines scrolled up from the bottom */
 static int    g_last_total = -1, g_last_cw = -1;
-static int    g_cell;          /* notebook execution count: one per chat message */
-static int    g_out_pending;   /* the next agent block opens the Out[g_cell] cell */
+static int    g_cell;          /* message number: one per chat message, shared by its reply */
+static int    g_out_pending;   /* the next agent block opens reply number g_cell */
 
-/* Left gutter holding the In/Out labels (0 on narrow screens: labels get their own line). */
-static int gutter_w(int cw) { return cw >= 60 ? 10 : 0; }
+/* Left gutter holding the reference numbers (0 on very narrow screens: number on its own line). */
+static int gutter_w(int cw) { return cw >= 30 ? 6 : 0; }
 
 static void gutter_label(char *out, size_t cap, int user, int num)
 {
-    char lab[32];
-    snprintf(lab, sizeof(lab), user ? "In [%d]:" : "Out[%d]:", num);
-    snprintf(out, cap, "%s", lab);
+    (void)user; /* colour tells message from reply */
+    snprintf(out, cap, "%d", num);
 }
 
 static blk_t *blk_add(int kind)
@@ -462,7 +461,7 @@ static void lay_header(blk_t *b, int cw)
     tlines_t logo = {0};
     lay_logo(&logo);
     int lw = logo_width();
-    int bw = cw < 74 ? cw : 74;
+    int bw = cw; /* full terminal width */
     int inner = bw - 4;
     tsty_t border = sty(T.surface, 0), title = sty(T.accent, TA_BOLD), mut = sty(T.muted, 0), txt = sty(T.text, 0);
     int side = inner >= lw + 3 + 22;
@@ -548,34 +547,37 @@ static void lay_header(blk_t *b, int cw)
     tl_free(&body);
 }
 
-/* A user message as a notebook input cell: a tinted, bordered box. */
+/* A sent user message: a tinted panel with an accent bar down its left edge (OpenCode style),
+ * one row of padding above and below. */
 static void lay_user_cell(tlines_t *L, const char *t, size_t n, int w)
 {
-    tsty_t bd = sty(T.surface, 0), in = sty_bg(T.text, T.user_bg, 0);
+    tsty_t bar = sty_bg(T.accent, T.user_bg, 0), in = sty_bg(T.text, T.user_bg, 0);
     int inner = w - 4 > 1 ? w - 4 : 1;
     tlines_t body = {0};
     lay_text(&body, t, n, in, inner, T.user_bg);
-    tline_t *l = tl_new(L, TC_NONE);
-    tl_put(l, bd, "╭", strlen("╭"));
-    for (int x = 0; x < w - 2; x++) {
-        tl_put(l, bd, "─", strlen("─"));
+    for (int y = -1; y <= body.n; y++) {
+        tline_t *l = tl_new(L, TC_NONE);
+        tl_put(l, bar, "┃", strlen("┃"));
+        tl_put(l, in, "  ", 2);
+        if (y >= 0 && y < body.n) {
+            tl_cat(l, &body.l[y]);
+        }
+        tl_pad(l, w, in);
     }
-    tl_put(l, bd, "╮", strlen("╮"));
-    for (int y = 0; y < body.n; y++) {
-        l = tl_new(L, TC_NONE);
-        tl_put(l, bd, "│", strlen("│"));
-        tl_put(l, in, " ", 1);
-        tl_cat(l, &body.l[y]);
-        tl_pad(l, w - 1, in);
-        tl_put(l, bd, "│", strlen("│"));
-    }
-    l = tl_new(L, TC_NONE);
-    tl_put(l, bd, "╰", strlen("╰"));
-    for (int x = 0; x < w - 2; x++) {
-        tl_put(l, bd, "─", strlen("─"));
-    }
-    tl_put(l, bd, "╯", strlen("╯"));
     tl_free(&body);
+}
+
+/* First chat message: the header and connect-flow lines go, so the conversation starts at the top. */
+static void blk_clear_all(void)
+{
+    for (int i = 0; i < g_nb; i++) {
+        tsb_free(&g_b[i].text);
+        free(g_b[i].extra);
+        tl_free(&g_b[i].L);
+    }
+    g_nb = 0;
+    g_scroll = 0;
+    g_last_total = -1;
 }
 
 /* Append C (laid out for width w) to L behind a gutter of width g; the label goes on line `at`
@@ -1181,8 +1183,6 @@ static void render(void)
         uint32_t bc = g_await ? T.accent : T.surface;
         tsty_t bs = sty(bc, 0);
         int bx1 = box_x0() + box_w(); /* one past the box's right edge */
-        char inlab[32];
-        gutter_label(inlab, sizeof(inlab), 1, g_cell + 1);
         {
             rowb_t rb = {&cur[box_top], 0, W};
             rb_gutter(&rb, NULL, 0);
@@ -1207,7 +1207,7 @@ static void render(void)
         for (int i = 0; i < bl; i++) {
             int r = Etop + i;
             rowb_t rb = {&cur[box_top + 1 + i], 0, W};
-            rb_gutter(&rb, i == 0 && (g_chat || !g_await) ? inlab : NULL, T.in_label);
+            rb_gutter(&rb, NULL, 0);
             int bx0 = rb.w;
             rb_text(&rb, bs, T.bg, "│", 1);
             rb_text(&rb, sty(T.text, 0), T.user_bg, " ", 1);
@@ -1499,8 +1499,18 @@ static void submit(void)
         return;
     }
     const char *text = E.p ? E.p : "";
+    int is_msg = g_chat && text[strspn(text, " \n\t")] && text[strspn(text, " \t")] != '/';
     cJSON *o = cJSON_CreateObject();
-    cJSON_AddStringToObject(o, "line", text);
+    if (is_msg) { /* "[N] text": lets the model resolve "redo 3" to message/reply number 3 */
+        tsb_t tagged = {0};
+        tsb_fmt(&tagged, "[%d] ", g_cell + 1);
+        tsb_str(&tagged, text);
+        cJSON_AddStringToObject(o, "line", tagged.p);
+        explicit_bzero(tagged.p, tagged.len);
+        tsb_free(&tagged);
+    } else {
+        cJSON_AddStringToObject(o, "line", text);
+    }
     send_json(o);
     cJSON *v = cJSON_GetObjectItemCaseSensitive(o, "line");
     if (cJSON_IsString(v)) {
@@ -1510,6 +1520,9 @@ static void submit(void)
 
     if (g_chat) {
         if (text[strspn(text, " \n\t")]) {
+            if (g_cell == 0) {
+                blk_clear_all();
+            }
             blk_text(B_USER, text);
             hist_add(text);
         }

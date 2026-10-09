@@ -252,6 +252,26 @@ if command -v tmux >/dev/null 2>&1; then
     tmux capture-pane -t botter-test -p >"$T/tmux.txt"
     tmux kill-session -t botter-test 2>/dev/null
     check "Ctrl-C cancels an in-flight LLM request within a second" "$T/tmux.txt" "\\(interrupted\\)"
+
+    # Botter's TUI: messages reach the model tagged [N]; the header is gone after the first message
+    stub_start --text /dev/null
+    tmux new-session -d -s botter-test -x 100 -y 30 -c "$T/ws" "env BOTTER_THEME=dark $BOTTER"
+    sleep 0.8
+    for k in 6 Enter "http://127.0.0.1:$PORT/v1" Enter Enter stub Enter; do
+        tmux send-keys -t botter-test "$k"
+        sleep 0.3
+    done
+    sleep 0.8
+    tmux send-keys -t botter-test "first message" Enter
+    sleep 1
+    tmux send-keys -t botter-test "second message" Enter
+    sleep 1.2
+    tmux capture-pane -t botter-test -p >"$T/tui.txt"
+    tmux kill-session -t botter-test 2>/dev/null
+    check "TUI: messages reach the model tagged with their number" "$T/rec/user.txt" "^\\[2\\] second message"
+    check "TUI: the model is told what the numbers mean" "$T/rec/system.txt" "numbers each user message and your reply"
+    check_not "TUI: header is gone after the first message" "$T/tui.txt" "the agent that builds agents"
+    if head -3 "$T/tui.txt" | grep -q "first message"; then pass "TUI: the first message is at the top"; else fail "TUI: the first message is at the top"; fi
 else
     skip "Ctrl-C test" "tmux not installed"
 fi

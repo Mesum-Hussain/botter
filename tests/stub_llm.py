@@ -6,7 +6,8 @@
   stub_llm.py --portfile F --record DIR --slow                    POST hangs 60 s (for Ctrl-C tests)
 
 Binds 127.0.0.1 on a free port and writes it to --portfile when ready.
-Records the last system prompt to DIR/system.txt and the last tool result to DIR/tool.txt.
+Records the last system prompt to DIR/system.txt, the last user message to DIR/user.txt and the
+last tool result to DIR/tool.txt.
 """
 import argparse, json, os, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -50,6 +51,9 @@ class H(BaseHTTPRequestHandler):
         msgs = req["messages"]
         if msgs and msgs[0]["role"] == "system":
             save("system.txt", msgs[0]["content"])
+        users = [m for m in msgs if m["role"] == "user"]
+        if users:
+            save("user.txt", users[-1]["content"])
 
         def reply(msg):
             self.send({"choices": [{"message": dict(role="assistant", **msg), "finish_reason": "stop"}]})

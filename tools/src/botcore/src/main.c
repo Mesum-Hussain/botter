@@ -476,16 +476,23 @@ int main(int argc, char **argv)
     }
     const char *persona = agent_prompt();
     const char *cwd = guard_ctx();
+    /* Botter's UI numbers each message and the reply to it, and tags messages "[N] ...". */
+    static const char FRONT_HINT[] =
+        "\nThe user's UI numbers each user message and your reply to it with the same number; messages "
+        "arrive prefixed with [N]. When the user refers to a number (\"redo 3\", \"like in 2\"), they mean that "
+        "message and your reply to it. Do not put such numbers in your own replies.";
+    const char *front_hint = front_active() ? FRONT_HINT : "";
     char *index = vfs_count() ? pack_index() : NULL;
     size_t sl = strlen(persona) + strlen(cwd) + sizeof(FIXED) + strlen(net_text) + sizeof(VFS_HINT) +
-                sizeof(FLOW_HINT) + (index ? strlen(index) : 0) + 64;
+                sizeof(FLOW_HINT) + sizeof(FRONT_HINT) + (index ? strlen(index) : 0) + 64;
     char *sys = malloc(sl);
     if (!sys) {
         fprintf(stderr, ANSI_BOLD_RED "Error:" ANSI_RESET " out of memory\n");
         return 1;
     }
-    snprintf(sys, sl, "%s\n\nWorking directory: %s\n%s %s%s%s%s%s", persona, cwd, FIXED, net_text,
-             vfs_count() ? "\n" : "", vfs_count() ? VFS_HINT : "", index ? index : "", has_flow ? FLOW_HINT : "");
+    snprintf(sys, sl, "%s\n\nWorking directory: %s\n%s %s%s%s%s%s%s", persona, cwd, FIXED, net_text,
+             vfs_count() ? "\n" : "", vfs_count() ? VFS_HINT : "", index ? index : "", has_flow ? FLOW_HINT : "",
+             front_hint);
     free(index);
     chat_set_system(&chat, sys);
     free(sys);
