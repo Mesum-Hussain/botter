@@ -38,6 +38,14 @@ typedef struct {
 int  chat_init(chat_t *c, const char *base, const char *key, const char *model);
 void chat_free(chat_t *c);
 
+/*
+ * Switch c to the endpoint, key and model of `from` (a freshly validated
+ * chat_init session, freed here), keeping c's history, tools and callbacks.
+ * Tool calls in the history are reduced to the standard fields, so another
+ * provider does not reject the previous one's extensions.
+ */
+void chat_switch(chat_t *c, chat_t *from);
+
 /* Enable tool calling. Takes ownership of `tools`. cb runs each call and returns the result text. */
 void chat_set_tools(chat_t *c, cJSON *tools, char *(*cb)(void *, const char *, const char *), void *ud);
 

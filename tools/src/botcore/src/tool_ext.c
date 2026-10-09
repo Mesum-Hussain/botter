@@ -47,6 +47,7 @@ struct ext_tool {
     cJSON             *parameters;
     int                timeout_s;
     int                network; /* descriptor "network": true: runs outside the empty netns if allowed */
+    int                readonly; /* descriptor "readonly": true: changes nothing, runs in Plan mode without asking */
     const vfs_entry_t *exe;
 };
 
@@ -111,6 +112,7 @@ void ext_init(void)
         const cJSON *par = cJSON_GetObjectItemCaseSensitive(j, "parameters");
         const cJSON *to = cJSON_GetObjectItemCaseSensitive(j, "timeout_s");
         const cJSON *net = cJSON_GetObjectItemCaseSensitive(j, "network");
+        const cJSON *ro = cJSON_GetObjectItemCaseSensitive(j, "readonly");
         if (!cJSON_IsObject(j) || !cJSON_IsString(desc) || !desc->valuestring[0]) {
             warn(name, "descriptor must be a JSON object with a non-empty \"description\"");
             cJSON_Delete(j);
@@ -136,6 +138,7 @@ void ext_init(void)
             e->timeout_s = to->valuedouble > EXT_MAX_TIMEOUT_S ? EXT_MAX_TIMEOUT_S : (int)to->valuedouble;
         }
         e->network = cJSON_IsTrue(net);
+        e->readonly = cJSON_IsTrue(ro);
         e->exe = &t[i];
         cJSON_Delete(j);
     }
@@ -278,6 +281,14 @@ bool ext_run(const ext_tool_t *t, const cJSON *in, char *result, size_t rl)
     if (guard_offline() && t->network && !g_net_allowed) {
         snprintf(result, rl, "this tool needs internet access, which the user did not allow for this session. "
                              "Tell the user; it cannot be used until the agent is restarted and access is allowed.");
+        return false;
+    }
+    /* Plan mode: the working directory is read-only for the tool anyway, but it may still act
+     * elsewhere (send mail, call an API), so tools not declared read-only need a yes. */
+    if (guard_plan() && !t->readonly &&
+        !guard_confirm("Plan mode: run the agent tool %s? It is not marked read-only and may change "
+                       "things outside this folder (APIs, messages).", t->name)) {
+        snprintf(result, rl, "%s", GUARD_PLAN_REFUSAL);
         return false;
     }
     char *args = cJSON_PrintUnformatted(in);

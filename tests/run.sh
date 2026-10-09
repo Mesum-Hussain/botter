@@ -13,6 +13,9 @@ BOTTER=$ROOT/botter
 T=$(mktemp -d "${TMPDIR:-/tmp}/botter-test.XXXXXX")
 PASS=0 FAIL=0 SKIP=0
 STUB=
+# Never touch the user's real key cache; the keyring tests use their own namespace.
+export BOTCORE_NO_KEYRING=1
+KRNS=botter-test-$$
 
 cleanup() {
     [ -n "$STUB" ] && kill "$STUB" 2>/dev/null
@@ -131,6 +134,40 @@ else
     shell_call "python3 -c \"import tempfile;f=tempfile.NamedTemporaryFile();f.write(b'x');print('TMP-OK')\""
     drive "$T/on.bot" "$T/ws"
     check "Landlock: /tmp stays writable" "$T/rec/tool.txt" "TMP-OK"
+
+    # Plan mode: drive with /plan typed before the message
+    plan_drive() { (cd "$2" && printf '6\nhttp://127.0.0.1:%s/v1\n\nstub\n/plan\ngo\n/exit\n' "$PORT" |
+        timeout 60 "$1" >"$T/out" 2>&1); }
+    shell_call "echo planned > plan.txt; ls plan.txt 2>&1 | tail -1"
+    plan_drive "$T/on.bot" "$T/ws"
+    check "Plan mode: shell commands cannot write in the working directory" "$T/rec/tool.txt" "Permission denied|Read-only"
+    if [ -e "$T/ws/plan.txt" ]; then fail "Plan mode: no file was created"; else pass "Plan mode: no file was created"; fi
+    check "Plan mode: the model is told the mode" "$T/rec/user.txt" "^\\[Mode: PLAN"
+    tool_call fs_write '{"path":"plan2.txt","content":"x"}'
+    plan_drive "$T/on.bot" "$T/ws"
+    check "Plan mode: fs_write is refused" "$T/rec/tool.txt" "PLAN MODE"
+    echo READ-OK >"$T/ws/readme.txt"
+    shell_call "cat readme.txt"
+    plan_drive "$T/on.bot" "$T/ws"
+    check "Plan mode: read-only commands still run" "$T/rec/tool.txt" "READ-OK"
+fi
+
+# Session key cache (kernel keyring, own namespace): 2nd run reconnects without asking
+if [ -r /proc/keys ]; then
+    shell_call "python3 -c \"import ctypes,os;l=ctypes.CDLL(None,use_errno=True);r=l.syscall(250,0,0,0,0,0);print('KEYCTL',r,os.strerror(ctypes.get_errno()))\""
+    (cd "$T/ws" && printf '6\nhttp://127.0.0.1:%s/v1\nsk-cache-test\nstub\ngo\n/exit\n' "$PORT" |
+        timeout 60 env -u BOTCORE_NO_KEYRING BOTCORE_KEYRING_NS=$KRNS "$T/on.bot" >"$T/out" 2>&1)
+    check "key cache: tool children cannot use the keyring syscalls" "$T/rec/tool.txt" "KEYCTL -1 Function not implemented"
+    (cd "$T/ws" && printf 'go\n/exit\n' | timeout 60 env -u BOTCORE_NO_KEYRING BOTCORE_KEYRING_NS=$KRNS "$T/on.bot" >"$T/out" 2>&1)
+    check "key cache: the next run reconnects without asking" "$T/out" "saved for this session"
+    check_not "key cache: no provider question on the next run" "$T/out" "Select an OpenAI-compatible provider"
+    check "key cache: the saved key is sent" "$T/rec/auth.txt" "sk-cache-test"
+    (cd "$T/ws" && printf '/forget\n/exit\n' | timeout 60 env -u BOTCORE_NO_KEYRING BOTCORE_KEYRING_NS=$KRNS "$T/on.bot" >"$T/out" 2>&1)
+    check "key cache: /forget removes the saved entries" "$T/out" "Forgot 3 saved"
+    (cd "$T/ws" && printf '' | timeout 60 env -u BOTCORE_NO_KEYRING BOTCORE_KEYRING_NS=$KRNS "$T/on.bot" >"$T/out" 2>&1)
+    check "key cache: after /forget the provider is asked again" "$T/out" "Select an OpenAI-compatible provider"
+else
+    skip "key cache tests" "kernel has no keyring"
 fi
 
 mkagent "$T/skilled"

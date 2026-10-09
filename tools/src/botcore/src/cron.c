@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include "guard.h"
 #include "tools.h"
 
 #include <stdio.h>
@@ -93,6 +94,11 @@ static bool cron_set(const cJSON *in, char *result, size_t rl)
     const cJSON *tj = cJSON_GetObjectItemCaseSensitive(in, "type");
     const cJSON *aj = cJSON_GetObjectItemCaseSensitive(in, "action");
     int v = 0, minute = 0;
+
+    if (guard_plan()) {
+        snprintf(result, rl, "%s", GUARD_PLAN_REFUSAL);
+        return false;
+    }
 
     if (!cJSON_IsString(tj)) {
         snprintf(result, rl, "'type' required: periodic, daily or once");

@@ -310,6 +310,8 @@ static char  *g_model, *g_cwd;
 static int    g_scroll;        /* lines scrolled up from the bottom */
 static int    g_last_total = -1, g_last_cw = -1;
 static int    g_cell;          /* message number: one per chat message (its reply is "the reply to n") */
+static int    g_plan;          /* botcore's mode: 0 = Build, 1 = Plan (its "mode" event) */
+static int    g_plan_want = -1; /* tab while busy: mode to ask for at the next chat prompt */
 
 /* Left gutter holding the reference numbers (0 on very narrow screens: number on its own line). */
 static int gutter_w(int cw) { return cw >= 30 ? 6 : 0; }
@@ -489,7 +491,7 @@ static void lay_header(blk_t *b, int cw)
     l = tl_new(&info, TC_NONE);
     tl_put_trunc(l, mut, "Describe the agent you want to build.", tw);
     l = tl_new(&info, TC_NONE);
-    tl_put_trunc(l, mut, "/exit quits · ctrl+o expands details", tw);
+    tl_put_trunc(l, mut, "tab: plan/build · /provider · /help · /exit", tw);
 
     tlines_t body = {0};
     if (side) {
@@ -1249,7 +1251,15 @@ static void render(void)
                 snprintf(m, sizeof(m), "─ %d/%d ", crow + 1, nvl);
                 rb_text(&rb, bs, T.bg, m, tu_strwidth(m, strlen(m)));
             }
-            while (rb.w < bx1 - 1) {
+            /* mode label at the right end of the border: " Build " / " Plan " (tab switches) */
+            const char *ml = g_plan ? " Plan " : " Build ";
+            int mlw = (int)strlen(ml);
+            int lab = rb.w + mlw + 3 <= bx1 - 1;
+            while (rb.w < bx1 - 1 - (lab ? mlw + 1 : 0)) {
+                rb_text(&rb, bs, T.bg, "─", 1);
+            }
+            if (lab) {
+                rb_text(&rb, sty(g_plan ? T.purple : T.accent, TA_BOLD), T.bg, ml, mlw);
                 rb_text(&rb, bs, T.bg, "─", 1);
             }
             rb_text(&rb, bs, T.bg, "╯", 1);
@@ -1260,8 +1270,8 @@ static void render(void)
         if (footer) {
             rowb_t rb = {&cur[H - 1], 0, W};
             rb_fill(&rb, T.bg, 1);
-            const char *full = "enter send · alt+enter newline · pgup/pgdn/wheel scroll · ctrl+o expand · ctrl+c quit";
-            const char *mid = "enter send · alt+enter newline · pgup/pgdn scroll";
+            const char *full = "enter send · tab plan/build · alt+enter newline · pgup/pgdn/wheel scroll · ctrl+o expand · ctrl+c quit";
+            const char *mid = "enter send · tab plan/build · pgup/pgdn scroll";
             const char *small = "ctrl+c quit";
             int mw = g_model ? tu_strwidth(g_model, strlen(g_model)) + 2 : 0;
             const char *h = tu_strwidth(full, strlen(full)) + mw + 2 <= W ? full
@@ -1367,6 +1377,30 @@ static const char *jstr(const cJSON *j, const char *k)
     return cJSON_IsString(v) ? v->valuestring : "";
 }
 
+/* Ask botcore to switch Plan/Build (a command line; it answers with a "mode" event and a new prompt). */
+static void send_mode(int plan)
+{
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "line", plan ? "/plan" : "/build");
+    send_json(o);
+    cJSON_Delete(o);
+    g_await = 0;
+    g_plan_want = -1;
+    g_plan = plan; /* shown at once; the event confirms it */
+}
+
+/* tab: toggle Plan/Build now, or at the next chat prompt if Botter is working or asking something. */
+static void toggle_mode(void)
+{
+    int want = !(g_plan_want >= 0 ? g_plan_want : g_plan);
+    if (g_await && g_chat) {
+        send_mode(want);
+    } else {
+        g_plan_want = want;
+        notice(want ? "Plan mode after this turn" : "Build mode after this turn");
+    }
+}
+
 static void on_record(const char *json)
 {
     cJSON *j = cJSON_Parse(json);
@@ -1385,6 +1419,9 @@ static void on_record(const char *json)
                 tsb_free(&g_stash);
                 g_stashed = 0;
             }
+            if (g_plan_want >= 0 && g_plan_want != g_plan) {
+                send_mode(g_plan_want);
+            }
         } else {
             if (!g_stashed) {
                 tsb_free(&g_stash);
@@ -1392,6 +1429,11 @@ static void on_record(const char *json)
                 g_stashed = 1;
             }
             ed_clear();
+        }
+    } else if (!strcmp(ev, "mode")) {
+        g_plan = !strcmp(jstr(j, "mode"), "plan");
+        if (g_plan_want == g_plan) {
+            g_plan_want = -1;
         }
     } else if (!strcmp(ev, "busy")) {
         if (!g_busy) {
@@ -1495,6 +1537,12 @@ static void submit(void)
         return;
     }
     const char *text = E.p ? E.p : "";
+    if (g_chat && (!strcmp(text, "/plan") || !strcmp(text, "/build"))) {
+        hist_add(text);
+        ed_clear();
+        send_mode(text[1] == 'p');
+        return;
+    }
     int is_msg = g_chat && text[strspn(text, " \n\t")] && text[strspn(text, " \t")] != '/';
     cJSON *o = cJSON_CreateObject();
     if (is_msg) { /* "[N] text": lets the model resolve "redo 3" to message/reply number 3 */
@@ -1515,11 +1563,13 @@ static void submit(void)
     cJSON_Delete(o);
 
     if (g_chat) {
-        if (text[strspn(text, " \n\t")]) {
+        if (is_msg) {
             if (g_cell == 0) {
                 blk_clear_all();
             }
             blk_text(B_USER, text);
+        }
+        if (text[strspn(text, " \n\t")]) {
             hist_add(text);
         }
     } else {
@@ -1566,7 +1616,10 @@ static void do_key(int k)
         }
         break;
     case K_TAB:
-        ed_insert("    ", 4);
+        if (g_secret) {
+            break;
+        }
+        toggle_mode();
         break;
     case K_BS:
         if (Epos > 0) {

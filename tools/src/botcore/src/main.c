@@ -2,6 +2,7 @@
 #include "chat.h"
 #include "front.h"
 #include "guard.h"
+#include "keystore.h"
 #include "tools.h"
 #include "term.h"
 #include "vfs.h"
@@ -179,15 +180,112 @@ static void say_err(const char *what, const char *detail)
     fprintf(stderr, ANSI_BOLD_RED "Error:" ANSI_RESET " %s%s%s\n", what, detail ? ": " : "", detail ? detail : "");
 }
 
+/* Display name of a base URL: its preset's name, else the URL itself. */
+static const char *provider_name(const char *base)
+{
+    for (int i = 0; i < N_PROV; i++) {
+        if (PROVIDERS[i].base[0] && strcmp(PROVIDERS[i].base, base) == 0) {
+            return PROVIDERS[i].name;
+        }
+    }
+    return base;
+}
+
+/* Keyring entry names (keystore.c): per base URL, so each provider keeps its own key and model. */
+static void ks_name(char *out, size_t cap, const char *what, const char *base)
+{
+    snprintf(out, cap, "%s:%s", what, base);
+}
+
+/* After a successful connect: remember key, model and provider until reboot (kernel keyring, RAM only). */
+static void remember(const char *base, const char *key, const char *model)
+{
+    char n[600];
+    if (*key) {
+        ks_name(n, sizeof(n), "key", base);
+        ks_put(n, key);
+    }
+    ks_name(n, sizeof(n), "model", base);
+    ks_put(n, model);
+    ks_put("last", base);
+}
+
+/* chat_init + GET /models. 1 = connected, 0 = failed (message shown), -1 = Ctrl-C. *auth = key rejected. */
+static int try_connect(chat_t *c, const char *name, const char *base, const char *key, const char *model, int *auth)
+{
+    char *err = NULL;
+    *auth = 0;
+    if (chat_init(c, base, key, model) != 0) {
+        say_err("out of memory", NULL);
+        return 0;
+    }
+    printf(ANSI_DIM "Connecting to %s ..." ANSI_RESET "\n", name);
+    fflush(stdout);
+    front_event("busy", "label", "Connecting", (char *)NULL);
+    int rc = chat_validate(c, &err);
+    front_event("idle", (char *)NULL);
+    if (rc != CHAT_OK) {
+        if (rc != CHAT_ERR_ABORT) {
+            say_err(rc == CHAT_ERR_AUTH ? "API key rejected" : "connection check failed", err);
+        }
+        *auth = rc == CHAT_ERR_AUTH;
+        chat_free(c);
+    }
+    free(err);
+    return rc == CHAT_OK ? 1 : rc == CHAT_ERR_ABORT ? -1 : 0;
+}
+
+/*
+ * Reconnect to the provider used last in this boot without asking (key and
+ * model come from the kernel keyring). 1 = connected, 0 = nothing saved or it
+ * failed (fall back to asking), -1 = Ctrl-C.
+ */
+static int connect_saved(chat_t *c)
+{
+    char base[512], model[256], n[600], key[1024];
+    if (ks_get("last", base, sizeof(base)) <= 0) {
+        return 0;
+    }
+    ks_name(n, sizeof(n), "model", base);
+    if (ks_get(n, model, sizeof(model)) <= 0) {
+        return 0;
+    }
+    ks_name(n, sizeof(n), "key", base);
+    if (ks_get(n, key, sizeof(key)) < 0) {
+        key[0] = '\0';
+    }
+    int req = 0;
+    for (int i = 0; i < N_PROV; i++) {
+        req |= PROVIDERS[i].key_req && strcmp(PROVIDERS[i].base, base) == 0;
+    }
+    int auth = 0, r = 0;
+    if (!(req && !key[0]) && url_ok(base) && !has_ctl_or_space(key) && !has_ctl_or_space(model)) {
+        printf(ANSI_DIM "Using %s · %s (saved for this session; /provider to switch)" ANSI_RESET "\n",
+               provider_name(base), model);
+        r = try_connect(c, provider_name(base), base, key, model, &auth);
+    }
+    if (auth) { /* stale key: forget it so the next prompt does not offer it */
+        ks_name(n, sizeof(n), "key", base);
+        ks_put(n, "");
+    }
+    explicit_bzero(key, sizeof(key));
+    if (r == 0) {
+        puts("");
+    }
+    return r;
+}
+
 /*
  * Interactive connect: provider -> (url) -> key -> model -> validate.
+ * A key or model saved earlier in this boot is offered as the default.
  * Returns 1 and fills *c on success, 0 on EOF/quit.
  */
 static int connect_flow(chat_t *c)
 {
     for (;;) {
-        char *in = NULL, *base = NULL, *key = NULL, *model = NULL, *err = NULL;
-        int idx = 0, rc, ok = 0;
+        char *in = NULL, *base = NULL, *key = NULL, *model = NULL;
+        char saved_key[1024] = "", saved_model[256] = "", n[600];
+        int idx = 0, rc, ok = 0, auth = 0;
 
         puts(ANSI_BLUE "Select an OpenAI-compatible provider:" ANSI_RESET);
         for (int i = 0; i < N_PROV; i++) {
@@ -226,26 +324,42 @@ static int connect_flow(chat_t *c)
                 continue;
             }
         }
+        ks_name(n, sizeof(n), "key", base);
+        if (ks_get(n, saved_key, sizeof(saved_key)) < 0 || has_ctl_or_space(saved_key)) {
+            saved_key[0] = '\0';
+        }
+        ks_name(n, sizeof(n), "model", base);
+        if (ks_get(n, saved_model, sizeof(saved_model)) < 0 || has_ctl_or_space(saved_model)) {
+            saved_model[0] = '\0';
+        }
 
-        rc = term_readline(p->key_req ? ASK("API key: ") : ASK("API key (leave empty if none): "), 1, &in);
+        rc = term_readline(saved_key[0]   ? ASK("API key [Enter = saved key]: ")
+                           : p->key_req ? ASK("API key: ")
+                                        : ASK("API key (leave empty if none): "),
+                           1, &in);
         if (rc != TERM_LINE) {
+            explicit_bzero(saved_key, sizeof(saved_key));
             free(base);
             return 0;
         }
-        key = strdup(trim(in));
+        key = strdup(*trim(in) ? trim(in) : saved_key);
         explicit_bzero(in, strlen(in));
+        explicit_bzero(saved_key, sizeof(saved_key));
         free(in);
-        if (has_ctl_or_space(key) || (p->key_req && !*key)) {
-            say_err(*key ? "API key contains invalid characters" : "API key required", NULL);
-            explicit_bzero(key, strlen(key));
+        if (!key || has_ctl_or_space(key) || (p->key_req && !*key)) {
+            say_err(key && *key ? "API key contains invalid characters" : "API key required", NULL);
+            if (key) {
+                explicit_bzero(key, strlen(key));
+            }
             free(key);
             free(base);
             continue;
         }
 
-        char mp[160];
-        if (p->model[0]) {
-            snprintf(mp, sizeof(mp), ANSI_BLUE "Model [%s]: " ANSI_RESET, p->model);
+        const char *def = saved_model[0] ? saved_model : p->model;
+        char mp[320];
+        if (def[0]) {
+            snprintf(mp, sizeof(mp), ANSI_BLUE "Model [%s]: " ANSI_RESET, def);
         } else {
             snprintf(mp, sizeof(mp), ASK("Model: "));
         }
@@ -255,8 +369,8 @@ static int connect_flow(chat_t *c)
                 break;
             }
             char *m = trim(in);
-            if (!*m && p->model[0]) {
-                m = (char *)p->model;
+            if (!*m && def[0]) {
+                m = (char *)def;
             }
             if (*m && !has_ctl_or_space(m)) {
                 model = strdup(m);
@@ -268,31 +382,13 @@ static int connect_flow(chat_t *c)
         }
         if (!model) {
             ok = -1; /* EOF or Ctrl-C quits */
-            goto cleanup;
-        }
-
-        if (chat_init(c, base, key, model) != 0) {
-            say_err("out of memory", NULL);
-            goto cleanup;
-        }
-        printf(ANSI_DIM "Connecting to %s ..." ANSI_RESET "\n", p->name);
-        fflush(stdout);
-        front_event("busy", "label", "Connecting", (char *)NULL);
-        rc = chat_validate(c, &err);
-        front_event("idle", (char *)NULL);
-        if (rc == CHAT_OK) {
-            ok = 1;
         } else {
-            if (rc == CHAT_ERR_ABORT) {
-                ok = -1; /* Ctrl-C while connecting quits */
-            } else {
-                say_err(rc == CHAT_ERR_AUTH ? "API key rejected" : "connection check failed", err);
+            ok = try_connect(c, p->name, base, key, model, &auth);
+            if (ok > 0) {
+                remember(base, key, model);
             }
-            chat_free(c);
         }
 
-cleanup:
-        free(err);
         free(model);
         free(base);
         if (key) {
@@ -336,15 +432,48 @@ static void on_chat_event(void *ud, int kind, const char *text)
 }
 
 static int g_last_dropped;
+static int g_mode_told = 0; /* mode the model was last told about (0 = Build, the default) */
+
+static const char PLAN_NOTE[] =
+    "[Mode: PLAN. Read-only: investigate (read files, run read-only commands, ask the user questions) "
+    "and write a concrete step-by-step plan. Do not try to change files, schedule tasks or take actions; "
+    "the working directory is read-only for every tool. When the plan is ready, ask the user to switch "
+    "to Build mode.]\n";
+static const char BUILD_NOTE[] = "[Mode: BUILD. Changes are allowed again: carry out the agreed plan.]\n";
+
+/* Show the current mode (REPL: a line; Botter's UI: an event it shows in its input box). */
+static void show_mode(void)
+{
+    if (front_active()) {
+        front_event("mode", "mode", guard_plan() ? "plan" : "build", (char *)NULL);
+    } else if (guard_plan()) {
+        puts(ANSI_DIM "Plan mode: read-only, the agent investigates and plans (/build to make changes)" ANSI_RESET);
+    } else {
+        puts(ANSI_DIM "Build mode: the agent can make changes (/plan for read-only planning)" ANSI_RESET);
+    }
+}
 
 /* One agent turn: send `text`, run any tool calls, print the answer. */
 static void run_turn(chat_t *chat, const char *text)
 {
     char *reply = NULL, *err = NULL;
 
+    /* Tell the model when the mode changed since its last turn (the kernel enforces Plan mode anyway). */
+    char *sent = NULL;
+    if (g_mode_told != guard_plan()) {
+        const char *note = guard_plan() ? PLAN_NOTE : BUILD_NOTE;
+        sent = malloc(strlen(note) + strlen(text) + 1);
+        if (sent) {
+            strcpy(sent, note);
+            strcat(sent, text);
+            text = sent;
+            g_mode_told = guard_plan();
+        }
+    }
     term_clear_interrupt();
     front_event("busy", "label", "Thinking", (char *)NULL);
     int r = chat_send(chat, text, &reply, &err);
+    free(sent);
     front_event("idle", (char *)NULL);
     term_clear_interrupt();
 
@@ -414,7 +543,8 @@ int main(int argc, char **argv)
     front_init();
     ext_init();
 
-    if (!connect_flow(&chat)) {
+    int saved = connect_saved(&chat);
+    if (saved < 0 || (saved == 0 && !connect_flow(&chat))) {
         return 0;
     }
 
@@ -459,6 +589,10 @@ int main(int argc, char **argv)
     static const char VFS_HINT[] =
         "Your built-in reference files (skills/, tools/doc/, flow.md) are read-only and available via "
         "vfs_list and vfs_read. Read the relevant skill or tool doc before using a tool you are unsure about.";
+    static const char MODE_HINT[] =
+        "\nThe user can switch you between Build mode (default: you may change things) and Plan mode "
+        "(read-only: investigate and plan; writes are refused). A note like [Mode: PLAN] at the start of a "
+        "message tells you the mode changed.";
     static const char FLOW_HINT[] =
         "\nAt the start of the session, read flow.md: it is the flow of this session written in OML "
         "(plain-English pseudo code: set, if/elif/else, for, while, in parallel, retry N times, ask user, "
@@ -484,21 +618,22 @@ int main(int argc, char **argv)
     const char *front_hint = front_active() ? FRONT_HINT : "";
     char *index = vfs_count() ? pack_index() : NULL;
     size_t sl = strlen(persona) + strlen(cwd) + sizeof(FIXED) + strlen(net_text) + sizeof(VFS_HINT) +
-                sizeof(FLOW_HINT) + sizeof(FRONT_HINT) + (index ? strlen(index) : 0) + 64;
+                sizeof(FLOW_HINT) + sizeof(FRONT_HINT) + sizeof(MODE_HINT) + (index ? strlen(index) : 0) + 64;
     char *sys = malloc(sl);
     if (!sys) {
         fprintf(stderr, ANSI_BOLD_RED "Error:" ANSI_RESET " out of memory\n");
         return 1;
     }
-    snprintf(sys, sl, "%s\n\nWorking directory: %s\n%s %s%s%s%s%s%s", persona, cwd, FIXED, net_text,
+    snprintf(sys, sl, "%s\n\nWorking directory: %s\n%s %s%s%s%s%s%s%s", persona, cwd, FIXED, net_text,
              vfs_count() ? "\n" : "", vfs_count() ? VFS_HINT : "", index ? index : "", has_flow ? FLOW_HINT : "",
-             front_hint);
+             MODE_HINT, front_hint);
     free(index);
     chat_set_system(&chat, sys);
     free(sys);
 
     front_event("info", "model", chat.model, "cwd", cwd, (char *)NULL);
     puts(ANSI_BOLD_BLUE "Connected" ANSI_RESET);
+    show_mode();
     if (!landlock) {
         puts(ANSI_DIM "(note: Landlock unavailable; shell commands and tools are not confined to the working directory)" ANSI_RESET);
     }
@@ -511,7 +646,9 @@ int main(int argc, char **argv)
     for (;;) {
         char *in = NULL;
         term_set_idle(cron_due);
-        int rc = term_readline(PROMPT_USER, 0, &in);
+        /* Botter's UI recognises the chat prompt by ">>" and shows the mode itself. */
+        int rc = term_readline(guard_plan() && !front_active() ? ANSI_DIM "plan " ANSI_RESET PROMPT_USER : PROMPT_USER,
+                               0, &in);
         term_set_idle(NULL);
 
         if (rc == TERM_TICK) {
@@ -539,6 +676,44 @@ int main(int argc, char **argv)
         if (strcmp(line, "/exit") == 0 || strcmp(line, "/quit") == 0) {
             free(in);
             break;
+        }
+        if (strcmp(line, "/plan") == 0 || strcmp(line, "/build") == 0 || strcmp(line, "/mode") == 0) {
+            if (line[1] != 'm') {
+                guard_set_plan(line[1] == 'p');
+            }
+            show_mode();
+            free(in);
+            continue;
+        }
+        if (strcmp(line, "/provider") == 0) {
+            chat_t next;
+            puts(ANSI_DIM "Switch provider (Ctrl-C keeps the current one; the conversation is kept)" ANSI_RESET);
+            if (connect_flow(&next)) {
+                chat_switch(&chat, &next);
+                front_event("info", "model", chat.model, "cwd", cwd, (char *)NULL);
+                printf(ANSI_BOLD_BLUE "Connected" ANSI_RESET " to %s · %s\n\n", provider_name(chat.base), chat.model);
+            } else {
+                puts(ANSI_DIM "(kept the current provider)" ANSI_RESET "\n");
+            }
+            free(in);
+            continue;
+        }
+        if (strcmp(line, "/forget") == 0) {
+            int n = ks_forget_all();
+            printf(ANSI_DIM "Forgot %d saved entr%s (API keys, models, last provider). "
+                   "The current session stays connected." ANSI_RESET "\n",
+                   n, n == 1 ? "y" : "ies");
+            free(in);
+            continue;
+        }
+        if (strcmp(line, "/help") == 0) {
+            puts(ANSI_DIM "/plan      read-only Plan mode (the agent investigates and plans)\n"
+                 "/build     Build mode: changes allowed (default)\n"
+                 "/provider  switch provider, key or model (keeps the conversation)\n"
+                 "/forget    remove saved API keys (they are kept in RAM until reboot)\n"
+                 "/exit      quit" ANSI_RESET);
+            free(in);
+            continue;
         }
 
         term_history_add(line);

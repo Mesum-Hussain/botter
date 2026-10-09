@@ -24,6 +24,18 @@ void        guard_set_offline(int offline);
 int         guard_offline(void);
 
 /*
+ * Plan / Build mode (like OpenCode). Build (the default) works as before. Plan
+ * is read-only: fs_write and cron_set refuse, shell_exec and tools run with the
+ * working directory read-only in Landlock (only /tmp-style scratch dirs stay
+ * writable), privileged commands are refused, and agent tools not marked
+ * "readonly": true in their descriptor ask the user first.
+ */
+void        guard_set_plan(int plan);
+int         guard_plan(void);
+#define GUARD_PLAN_REFUSAL "PLAN MODE: this would change things, which is not allowed while planning. " \
+                           "Finish the plan and ask the user to switch to Build mode (Tab in the UI, or /build)."
+
+/*
  * Resolve `path` (relative paths are relative to the context dir) to an
  * absolute, symlink-free path. The final components need not exist.
  * Returns 0 on success (*inside = 1 if within the context dir), -1 if the

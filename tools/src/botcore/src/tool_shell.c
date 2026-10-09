@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "guard.h"
+#include "keystore.h"
 #include "term.h"
 #include "tools.h"
 
@@ -143,6 +144,33 @@ static int enter_seccomp_offline(void)
     return prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER_, &prog, 0, 0) == 0 ? 0 : -1;
 }
 
+/*
+ * Every child: the keyring syscalls fail with ENOSYS (as on a kernel without
+ * keys), so tools and shell commands cannot reach the API keys botcore caches
+ * in the kernel keyring (keystore.c), not even by re-joining the session keyring.
+ */
+static int enter_seccomp_nokeys(void)
+{
+    struct sock_filter_ f[] = {
+        STMT(BPF_LD_W_ABS, offsetof(struct seccomp_data_, arch)),
+        JUMP(BPF_JEQ_K, AUDIT_ARCH_X86_64_, 1, 0),
+        STMT(BPF_RET_K, SECCOMP_RET_KILL_PROCESS),
+        STMT(BPF_LD_W_ABS, offsetof(struct seccomp_data_, nr)),
+        JUMP(BPF_JGE_K, X32_SYSCALL_BIT, 0, 1),
+        STMT(BPF_RET_K, SECCOMP_RET_KILL_PROCESS),
+        JUMP(BPF_JEQ_K, SYS_add_key, 3, 0),
+        JUMP(BPF_JEQ_K, SYS_request_key, 2, 0),
+        JUMP(BPF_JEQ_K, SYS_keyctl, 1, 0),
+        STMT(BPF_RET_K, SECCOMP_RET_ALLOW_),
+        STMT(BPF_RET_K, SECCOMP_RET_ERRNO_ | ENOSYS),
+    };
+    struct sock_fprog_ prog = {(unsigned short)(sizeof(f) / sizeof(f[0])), f};
+    if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
+        return -1;
+    }
+    return prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER_, &prog, 0, 0) == 0 ? 0 : -1;
+}
+
 /* Run fn in a throwaway child; 1 if it succeeded. */
 static int probe_child(int (*fn)(void))
 {
@@ -240,15 +268,38 @@ static void ll_add_grant(int rs, const char *path)
         }
     }
     if (strcmp(p, "/") != 0) {
-        ll_add(rs, p, g_ll_all);
+        ll_add(rs, p, guard_plan() ? LL_RO : g_ll_all);
     }
+}
+
+/*
+ * A writable scratch dir (/tmp, ~/.cache, ...). Landlock rules only add rights,
+ * so in Plan mode a scratch dir that contains the working directory would make
+ * it writable again: such a dir is read-only too.
+ */
+static void ll_scratch(int rs, const char *path)
+{
+    char r[PATH_MAX];
+    uint64_t access = g_ll_all;
+    if (guard_plan() && realpath(path, r)) {
+        size_t n = strlen(r);
+        const char *ctx = guard_ctx();
+        if (strncmp(ctx, r, n) == 0 && (ctx[n] == '/' || ctx[n] == '\0' || n == 1)) {
+            access = LL_RO;
+        }
+    }
+    ll_add(rs, path, access);
 }
 
 static void ll_home(int rs, const char *home, const char *rel, uint64_t access)
 {
     char p[PATH_MAX];
     snprintf(p, sizeof(p), "%s/%s", home, rel);
-    ll_add(rs, p, access);
+    if (access == g_ll_all) {
+        ll_scratch(rs, p);
+    } else {
+        ll_add(rs, p, access);
+    }
 }
 
 static int enter_landlock(void)
@@ -265,9 +316,9 @@ static int enter_landlock(void)
     }
     static const char *const rw[] = {"/tmp", "/var/tmp", "/dev", NULL};
     for (int i = 0; rw[i]; i++) {
-        ll_add(rs, rw[i], g_ll_all);
+        ll_scratch(rs, rw[i]);
     }
-    ll_add(rs, guard_ctx(), g_ll_all);
+    ll_add(rs, guard_ctx(), guard_plan() ? LL_RO : g_ll_all); /* Plan mode: read-only */
     const char *home = getenv("HOME");
     char hr[PATH_MAX] = "";
     if (home && *home && realpath(home, hr)) {
@@ -400,6 +451,18 @@ int tool_sandbox_apply(int cpu_s, int net)
         (void)!write(2, m, sizeof(m) - 1);
         return -1;
     }
+    if (guard_plan() && (!g_ll_abi || g_no_landlock)) {
+        const char m[] = "botcore: Plan mode needs the Landlock sandbox to keep this read-only; refusing to run\n";
+        (void)!write(2, m, sizeof(m) - 1);
+        return -1;
+    }
+    /* Approved privileged commands (sudo) run without no_new_privs, so no seccomp either. */
+    ks_child_lock();
+    if (!g_no_landlock && enter_seccomp_nokeys() != 0) {
+        const char m[] = "botcore: could not block keyring access; refusing to run\n";
+        (void)!write(2, m, sizeof(m) - 1);
+        return -1;
+    }
     return 0;
 }
 
@@ -435,6 +498,10 @@ static bool shell_exec(const cJSON *in, char *result, size_t rl)
     int cls = guard_shell_classify(cmd, why, sizeof(why));
     if (cls == SH_DENY) {
         snprintf(result, rl, "%s", why);
+        return false;
+    }
+    if (guard_plan() && cls == SH_CONFIRM && guard_shell_priv()) {
+        snprintf(result, rl, "%s", GUARD_PLAN_REFUSAL);
         return false;
     }
     if (cls == SH_CONFIRM &&

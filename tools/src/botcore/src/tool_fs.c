@@ -185,6 +185,10 @@ static bool fs_write(const cJSON *in, char *result, size_t rl)
     int append = cJSON_IsTrue(aj);
     char res[PATH_MAX];
 
+    if (guard_plan()) {
+        snprintf(result, rl, "%s", GUARD_PLAN_REFUSAL);
+        return false;
+    }
     if (!path || !content) {
         snprintf(result, rl, "'path' and 'content' (strings) are required");
         return false;

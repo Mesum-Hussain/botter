@@ -26,6 +26,18 @@ int guard_offline(void)
     return g_offline;
 }
 
+static int g_plan;
+
+void guard_set_plan(int plan)
+{
+    g_plan = plan;
+}
+
+int guard_plan(void)
+{
+    return g_plan;
+}
+
 void guard_init(void)
 {
     if (!getcwd(g_ctx, sizeof(g_ctx)) || !realpath(".", g_ctx)) {

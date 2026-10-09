@@ -49,6 +49,7 @@ class H(BaseHTTPRequestHandler):
             time.sleep(60)
             return
         msgs = req["messages"]
+        save("auth.txt", self.headers.get("Authorization", ""))
         if msgs and msgs[0]["role"] == "system":
             save("system.txt", msgs[0]["content"])
         users = [m for m in msgs if m["role"] == "user"]

@@ -13,7 +13,11 @@ mkdir myagent && cd myagent
 ./myagent.bot             # run the agent Botter built
 ```
 
-Nothing is saved between runs: the provider, key and model are asked at every start and live only in memory.
+The provider, key and model are asked once per boot: after a successful connect they are kept in the kernel keyring (RAM only, never on disk, gone at reboot), so later runs reconnect by themselves. `/provider` switches provider, key or model mid-conversation, `/forget` drops the saved keys, `BOTCORE_NO_KEYRING=1` turns the cache off. Nothing else is saved between runs.
+
+### Plan and Build modes
+
+Like OpenCode: **Build** (default) lets the agent change things; **Plan** is read-only, so the agent investigates and writes a plan. Switch with **Tab** in Botter's UI, or `/plan` and `/build` in any agent. In Plan mode `fs_write` and `cron_set` refuse, shell commands and tools run with the working directory read-only (kernel-enforced by Landlock), `sudo` is refused, and agent tools ask first unless their descriptor says `"readonly": true`.
 
 ## What an agent is made of
 
@@ -49,12 +53,12 @@ OML has `set`, `if`/`elif`/`else`, `for … in`, `while`, `in parallel`, `retry 
 
 - **Network**: agents are online by default. With `agent.json` `{"offline": true}` shell commands and tools are cut off from the network by the kernel (the LLM connection still works); single tools can be allowed back with `"network": true`, after the user agrees at start-up.
 - **Files**: shell commands and tools run in a Landlock sandbox: they may write only in the working directory, `/tmp` and package caches, and cannot see the rest of your home directory. Anything outside, or destructive, needs your approval first.
-- **Keys** stay in memory (locked, wiped on exit); the process cannot be inspected by other programs of your user.
+- **Keys** stay in memory (locked, wiped on exit); the process cannot be inspected by other programs of your user. The per-boot key cache lives in the kernel keyring, readable only by processes holding your login session's keyring; shell commands and tools are cut off from the keyring (seccomp), so a prompt-injected command cannot read it.
 
 ## Development
 
 ```sh
-make test                 # 36 tests: stub LLM, sandbox, OML lint, HTTP client, Ctrl-C
+make test                 # 51 tests: stub LLM, sandbox, OML lint, HTTP client, Ctrl-C
 BOTTER_TEST_NET=1 make test   # adds real providers and TLS failure cases
 make dist                 # dist/botter-<version>-linux-x86_64.tar.gz + .sha256
 ```

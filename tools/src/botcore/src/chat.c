@@ -47,6 +47,48 @@ void chat_free(chat_t *c)
     memset(c, 0, sizeof(*c));
 }
 
+/* Keep only {id, type, function{name, arguments}} in each stored tool call. */
+static void strip_tool_calls(cJSON *hist)
+{
+    cJSON *m;
+    cJSON_ArrayForEach(m, hist)
+    {
+        cJSON *calls = cJSON_GetObjectItemCaseSensitive(m, "tool_calls");
+        cJSON *tc;
+        cJSON_ArrayForEach(tc, calls)
+        {
+            for (cJSON *f = tc->child, *next; f; f = next) {
+                next = f->next;
+                if (strcmp(f->string, "id") != 0 && strcmp(f->string, "type") != 0 &&
+                    strcmp(f->string, "function") != 0) {
+                    cJSON_Delete(cJSON_DetachItemViaPointer(tc, f));
+                }
+            }
+        }
+    }
+}
+
+void chat_switch(chat_t *c, chat_t *from)
+{
+    if (strcmp(c->base, from->base) != 0) {
+        strip_tool_calls(c->hist);
+    }
+    if (c->key) {
+        size_t kl = strlen(c->key) + 1;
+        explicit_bzero(c->key, kl);
+        munlock(c->key, kl);
+    }
+    free(c->base);
+    free(c->key);
+    free(c->model);
+    c->base = from->base;
+    c->key = from->key;
+    c->model = from->model;
+    from->base = from->key = from->model = NULL;
+    c->thoughts = c->ev_cb && strstr(c->base, "generativelanguage.googleapis.com") != NULL;
+    chat_free(from);
+}
+
 static char *url_for(const chat_t *c, const char *path)
 {
     size_t n = strlen(c->base) + strlen(path) + 1;
