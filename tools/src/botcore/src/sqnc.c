@@ -389,7 +389,7 @@ static int sq_lev(const char *a, const char *b)
     return d[n][m];
 }
 
-static const char *const SQ_KW[] = {"LOAD", "CONNECT", "EXECUTE", "INVOKE", "SAVE", "SET",    "ASK", "IF",
+static const char *const SQ_KW[] = {"STEP", "LOAD", "CONNECT", "EXECUTE", "INVOKE", "SAVE", "SET",    "ASK", "IF",
                                     "ELSE", "END",     "FOR",     "WHILE",  "RETRY", "IN",   "RETURN", NULL};
 
 /* An UPPERCASE first word that is no keyword: a typo of one (error), or a shouted word (prose). */
@@ -458,6 +458,27 @@ static void sq_stmt(sq_ps *s, char *t)
 
     if (!upper) {
         sq_instr(s, t);
+        return;
+    }
+    if (!strcmp(w, "STEP")) { /* STEP n: NAME, a label numbered in order */
+        char *e;
+        long k = strtol(r, &e, 10);
+        if (e == r || k < 1 || *e != ':' || !*sq_skip(e + 1)) {
+            sq_diag(p, s->line, 1, "STEP reads: STEP n: NAME (numbered 1, 2, 3 ...)");
+            return;
+        }
+        if (k != s->step + 1) {
+            sq_diag(p, s->line, 0, "STEP %ld follows STEP %d", k, s->step);
+        }
+        if (s->depth) {
+            sq_diag(p, s->line, 0, "a STEP inside an open %s block (opened on line %d)",
+                    SQ_BLOCK[s->st[s->depth - 1].kind], s->st[s->depth - 1].line);
+        }
+        s->step = (int)k;
+        const char *nm = sq_skip(e + 1);
+        sq_node *x = sq_add(s, SQ_STEP);
+        x->a = sq_dup(nm, strlen(nm));
+        x->n = (int)k;
         return;
     }
     if (!strcmp(w, "LOAD")) {
@@ -752,9 +773,9 @@ static void sq_stmt(sq_ps *s, char *t)
 static size_t sq_front(sq_ps *s, const char *src, size_t n)
 {
     sq_prog *p = s->p;
-    s->line = 1;
+    s->line++;
     if (n < 4 || strncmp(src, "---", 3) != 0 || (src[3] != '\n' && src[3] != '\r')) {
-        sq_diag(p, 1, 1, "SQNC.md must start with frontmatter: ---, spec-version: \"sqnc-1\", title: \"...\", ---");
+        sq_diag(p, s->line, 1, "the frontmatter comes right after ```sqnc: ---, spec-version: \"sqnc-1\", title: \"...\", ---");
         return 0;
     }
     int ver = 0;
@@ -795,15 +816,13 @@ static size_t sq_front(sq_ps *s, const char *src, size_t n)
         }
         if (!strcmp(line, "spec-version")) {
             ver = 1;
-            if (!strcmp(val, "oml-2")) {
-                sq_diag(p, s->line, 1, "spec-version \"oml-2\" is now \"sqnc-1\" (OML was renamed Sqnc; nothing else changed)");
-            } else if (strcmp(val, "sqnc-1") != 0) {
+            if (strcmp(val, "sqnc-1") != 0) {
                 sq_diag(p, s->line, 1, "spec-version is \"%s\"; this botter understands \"sqnc-1\"", val);
             }
         } else if (!strcmp(line, "title")) {
             snprintf(p->title, sizeof(p->title), "%.199s", val);
-        } else if (strcmp(line, "author") != 0 && strcmp(line, "description") != 0) {
-            sq_diag(p, s->line, 0, "unknown frontmatter key '%s' (known: spec-version, title, author, description)", line);
+        } else if (strcmp(line, "description") != 0) {
+            sq_diag(p, s->line, 0, "unknown frontmatter key '%s' (known: spec-version, title, description)", line);
         }
     }
     sq_diag(p, s->line, 1, "the frontmatter is not closed with ---");
@@ -815,19 +834,24 @@ int sq_parse(const char *src, size_t n, sq_prog *p)
     sq_ps s;
     memset(&s, 0, sizeof(s));
     s.p = p;
-    if (n >= 11 && strncmp(src, "<!-- OML v1", 11) == 0) {
-        sq_diag(p, 1, 1,
-                "this SQNC.md uses the old OML v1 syntax; SQNC.md is now written in Sqnc (frontmatter + UPPERCASE "
-                "statements, see the write-flow skill): rewrite it");
+    /* The whole file is one ```sqnc block: frontmatter, then statements, then the closing ```. */
+    size_t first = strcspn(src, "\n");
+    const char *info = sq_skip(src + 3);
+    if (n < 3 || strncmp(src, "```", 3) != 0 || !sq_word(info, "sqnc")) {
+        sq_diag(p, 1, 1, strncmp(src, "---", 3) == 0
+                             ? "SQNC.md starts with ```sqnc on its first line; the frontmatter goes inside the block"
+                             : "SQNC.md starts with ```sqnc on its first line and ends with ``` (the whole file is "
+                               "one Sqnc block)");
         return p->errors;
     }
-    size_t i = sq_front(&s, src, n);
-    if (!i) {
+    s.line = 1;
+    size_t i = first < n ? first + 1 : n;
+    size_t fm = sq_front(&s, src + i, n - i);
+    if (!fm) {
         return p->errors;
     }
-    /* The program is in ```sqnc fenced blocks (several run in order); everything outside them is
-     * documentation, other fenced blocks (```json ...) included. */
-    int comment = 0, code = 0, other = 0, blocks = 0, open_line = 0;
+    i += fm;
+    int closed = 0;
     while (i < n) {
         s.line++;
         const char *l = src + i;
@@ -836,9 +860,7 @@ int sq_parse(const char *src, size_t n, sq_prog *p)
         i += ll + (nl != NULL);
         char buf[2048];
         if (ll >= sizeof(buf)) {
-            if (code) {
-                sq_diag(p, s.line, 1, "line too long (max %zu characters)", sizeof(buf) - 1);
-            }
+            sq_diag(p, s.line, 1, "line too long (max %zu characters)", sizeof(buf) - 1);
             continue;
         }
         memcpy(buf, l, ll);
@@ -848,58 +870,33 @@ int sq_parse(const char *src, size_t n, sq_prog *p)
         for (size_t k = strlen(t); k && (t[k - 1] == ' ' || t[k - 1] == '\t'); k--) {
             t[k - 1] = '\0';
         }
-        if (strncmp(t, "```", 3) == 0) {
-            const char *info = sq_skip(t + 3);
-            if (code || other) { /* closing fence */
-                if (code && s.depth) {
-                    sq_diag(p, s.line, 0, "a ```sqnc block ends inside an open %s block (opened on line %d); it "
-                            "continues in the next ```sqnc block",
-                            SQ_BLOCK[s.st[s.depth - 1].kind], s.st[s.depth - 1].line);
-                }
-                code = other = 0;
-            } else if (sq_word(info, "sqnc")) {
-                code = 1;
-                blocks++;
-                open_line = s.line;
-            } else {
-                other = 1;
+        if (closed) {
+            if (*t) {
+                sq_diag(p, s.line, 1, "nothing may follow the closing ``` of the Sqnc block");
+                break;
             }
-            s.params = 0;
-            continue;
-        }
-        if (!code) {
-            continue; /* documentation */
-        }
-        if (comment || strncmp(t, "<!--", 4) == 0) {
-            comment = strstr(t, "-->") == NULL;
             continue;
         }
         if (!*t) {
             continue;
         }
-        if (*t == '#') { /* headings are labels; "## STEP n: NAME" is numbered in order */
-            const char *h = t;
-            while (*h == '#') {
-                h++;
+        if (strncmp(t, "```", 3) == 0) {
+            if (t[3]) {
+                sq_diag(p, s.line, 1, "a code block cannot start inside the Sqnc block");
+                continue;
             }
-            h = sq_skip(h);
-            if (strncmp(h, "STEP ", 5) == 0 && isdigit((unsigned char)h[5])) {
-                char *e;
-                long k = strtol(h + 5, &e, 10);
-                if (k != s.step + 1) {
-                    sq_diag(p, s.line, 0, "STEP %ld follows STEP %d", k, s.step);
-                }
-                s.step = (int)k;
-                if (s.depth) {
-                    sq_diag(p, s.line, 0, "a STEP heading inside an open %s block (opened on line %d)",
-                            SQ_BLOCK[s.st[s.depth - 1].kind], s.st[s.depth - 1].line);
-                }
-                e = (char *)sq_skip(*e == ':' ? e + 1 : e);
-                sq_node *x = sq_add(&s, SQ_STEP);
-                x->a = sq_dup(e, strlen(e));
-                x->n = (int)k;
-            }
+            closed = 1;
             s.params = 0;
+            continue;
+        }
+        if (*t == '#' || strncmp(t, "<!--", 4) == 0) { /* Markdown is not part of Sqnc */
+            const char *h = t + strspn(t, "# ");
+            if (*t == '#' && strncmp(h, "STEP ", 5) == 0) {
+                sq_diag(p, s.line, 1, "write the step label as Sqnc, without #: STEP n: NAME");
+            } else {
+                sq_diag(p, s.line, 1, "Markdown (headings, <!-- comments -->) is not part of Sqnc; write plain "
+                                      "English or a Sqnc statement");
+            }
             continue;
         }
         int dash = (t[0] == '-' || t[0] == '*') && t[1] == ' ';
@@ -939,12 +936,8 @@ int sq_parse(const char *src, size_t n, sq_prog *p)
             sq_stmt(&s, t);
         }
     }
-    if (code) {
-        sq_diag(p, open_line, 1, "the ```sqnc block opened here is never closed with ```");
-    }
-    if (!blocks) {
-        sq_diag(p, s.line, 1, "SQNC.md has no ```sqnc code block: put the flow inside one (```sqnc ... ```)");
-        return p->errors;
+    if (!closed) {
+        sq_diag(p, s.line, 1, "the Sqnc block is never closed: end the file with ```");
     }
     while (s.depth > 0) {
         sq_frame *f = &s.st[--s.depth];

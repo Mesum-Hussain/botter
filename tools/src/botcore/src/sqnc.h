@@ -4,9 +4,9 @@
 #include <stddef.h>
 
 /*
- * Sqnc ("sequence"): the language of an agent's SQNC.md. Markdown with a
- * frontmatter (spec-version: "sqnc-1") and UPPERCASE statements; every other
- * line is a plain-English instruction. This file is the shared front end:
+ * Sqnc ("sequence"): the language of an agent's SQNC.md. The whole file is
+ * one ```sqnc block: a frontmatter (spec-version: "sqnc-1"), then UPPERCASE
+ * statements; every other line is a plain-English instruction (no Markdown). This file is the shared front end:
  * sq_parse() builds the syntax tree (syntax errors), sq_check() checks names
  * and variables (botter_pack, at build time), sqnc_run.c interprets the tree
  * (botcore, at run time). No dependencies beyond libc.
@@ -14,7 +14,7 @@
 
 enum {
     SQ_INSTR = 1, /* plain-English instruction            a = text */
-    SQ_STEP,      /* "## STEP n: NAME" heading            a = NAME, n = n */
+    SQ_STEP,      /* STEP n: NAME label                   a = NAME, n = n */
     SQ_LOAD,      /* LOAD SKILL "a"                       */
     SQ_EXEC,      /* EXECUTE tool `a` <b>                 b = rest (payload / prose), pk/pv = "- k: v" lines */
     SQ_INVOKE,    /* INVOKE SKILL "a" [USING <b>]          b = rest after the name (may start with USING) */

@@ -1,15 +1,15 @@
+```sqnc
 ---
 spec-version: "sqnc-1"
 title: "Test Flow"
 ---
-```sqnc
 LOAD SKILL "pitching"
-## STEP 1: GATHER
+STEP 1: GATHER
 1. ASK USER "Which folder?"
 2. SAVE answer INTO VARIABLE `folder`
 3. EXECUTE tool `fs_list` with payload { "path": `folder` }
 4. SAVE result INTO VARIABLE `files`
-## STEP 2: WORK
+STEP 2: WORK
 FOR EACH `f` IN `files` DO
     IF `f.name` IS EQUAL TO "notes.txt" THEN
         INVOKE SKILL "pitching" USING context `f`

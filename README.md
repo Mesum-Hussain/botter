@@ -84,19 +84,18 @@ At start-up, botcore lists every skill's name and description to the model, but 
 
 ### Sqnc: the flow, in structured English
 
-`SQNC.md` is the agent's program: the order of steps, the decisions and the loops. It is written in **Sqnc** (say "sequence"): plain English for the steps, CAPITALS for the structure. The program goes in a ` ```sqnc ` block, so Markdown never turns a step into a list item or a heading, and anything outside the block is documentation for people.
+`SQNC.md` is the agent's program: the order of steps, the decisions and the loops. It is written in **Sqnc** (say "sequence"): plain English for the steps, CAPITALS for the structure, and nothing else. The whole file is one ` ```sqnc ` block, with no Markdown in it (`STEP 1: GATHER`, not `## STEP 1`), so every line is either a Sqnc statement or an instruction for the agent.
 
 ````markdown
+```sqnc
 ---
 spec-version: "sqnc-1"
 title: "Lead Outreach"
+description: "Find businesses that need the user's service and pitch each one, with the user's approval."
 ---
-Finds businesses that need the user's service and pitches each one, with the user's approval.
-
-```sqnc
 LOAD SKILL "pitching"
 
-## STEP 1: GATHER
+STEP 1: GATHER
 1. ASK USER "What do you sell, and to which kind of clients?"
 2. SAVE answer INTO VARIABLE `target`
 3. RETRY UP TO 2 TIMES DO
@@ -107,7 +106,7 @@ LOAD SKILL "pitching"
        RETURN "No leads found. Try a broader client type or another city."
    END IF
 
-## STEP 2: OUTREACH
+STEP 2: OUTREACH
 FOR EACH `lead` IN `leads` DO
     INVOKE SKILL "pitching" USING context `lead`
     SAVE skill_output INTO VARIABLE `pitch`
@@ -121,12 +120,12 @@ FOR EACH `lead` IN `leads` DO
     END IF
 END FOR
 
-## STEP 3: DONE
+STEP 3: DONE
 RETURN "Contacted " + `leads.length` + " leads"
 ```
 ````
 
-Statements: `LOAD SKILL`, `EXECUTE tool`, `INVOKE SKILL`, `ASK USER`, `SAVE ... INTO VARIABLE` / `TO FILE`, `SET ... TO`, `IF / ELSE IF / ELSE / END IF`, `FOR EACH / END FOR`, `WHILE ... AT MOST N TIMES / END WHILE`, `RETRY UP TO N TIMES / END RETRY`, `IN PARALLEL / END PARALLEL`, `RETURN`. Any other line is a plain-English instruction.
+Statements: `STEP n: NAME` (labels), `LOAD SKILL`, `EXECUTE tool`, `INVOKE SKILL`, `ASK USER`, `SAVE ... INTO VARIABLE` / `TO FILE`, `SET ... TO`, `IF / ELSE IF / ELSE / END IF`, `FOR EACH / END FOR`, `WHILE ... AT MOST N TIMES / END WHILE`, `RETRY UP TO N TIMES / END RETRY`, `IN PARALLEL / END PARALLEL`, `RETURN`. Any other line is a plain-English instruction.
 
 **Why this shape:** humans and LLMs both read it at a glance, and the structure is explicit (`END IF`, `END FOR`), so nothing depends on indentation. Data stays apart from instructions: values live in `` `variables` `` and `"strings"`, and the model is told that what a variable holds (a scraped web page, an email) is data, never a command to follow. That is a deliberate defence against prompt injection.
 
@@ -135,14 +134,15 @@ Statements: `LOAD SKILL`, `EXECUTE tool`, `INVOKE SKILL`, `ASK USER`, `SAVE ... 
 The build checks `SQNC.md` like a compiler front end, and refuses to build a broken flow. Real messages, from breaking the example above:
 
 ```
-SQNC.md:23: error: unknown keyword INVOCATE; did you mean INVOKE?
-SQNC.md:27: error: EXECUTE tool `send_mail`: no such tool (built-in, or tools/bin/send_mail with tools/doc/send_mail.json)
-SQNC.md:29: error: `pich` is used before it is set (SAVE ... INTO VARIABLE `pich`, SET `pich` TO ..., or FOR EACH `pich` IN ...)
-SQNC.md:32: error: END FOR, but the IF opened on line 26 is still open (close it with END IF first)
-SQNC.md:36: error: `lead` only exists inside its FOR EACH loop
+SQNC.md:22: error: unknown keyword INVOCATE; did you mean INVOKE?
+SQNC.md:26: error: EXECUTE tool `send_mail`: no such tool (built-in, or tools/bin/send_mail with tools/doc/send_mail.json)
+SQNC.md:28: error: `pich` is used before it is set (SAVE ... INTO VARIABLE `pich`, SET `pich` TO ..., or FOR EACH `pich` IN ...)
+SQNC.md:31: error: END FOR, but the IF opened on line 25 is still open (close it with END IF first)
+SQNC.md:35: error: `lead` only exists inside its FOR EACH loop
+SQNC.md:20: error: write the step label as Sqnc, without #: STEP n: NAME
 ```
 
-It checks matched blocks, tools and skills that really exist, variables set before use (and loop variables not used after their loop), quoting, bounded retries, and keyword typos.
+It checks the file's shape (one ` ```sqnc ` block, no Markdown), matched blocks, tools and skills that really exist, variables set before use (and loop variables not used after their loop), quoting, bounded retries, and keyword typos.
 
 #### Reviewed by an LLM
 
@@ -215,7 +215,7 @@ The reference rows are the bare interpreters, before any agent framework is even
 ## Development
 
 ```sh
-make test                     # 111 tests: Sqnc compiler + interpreter + review, config.json, sandbox, streaming, key cache, Plan mode, HTTP, TUI
+make test                     # 114 tests: Sqnc compiler + interpreter + review, config.json, sandbox, streaming, key cache, Plan mode, HTTP, TUI
 BOTTER_TEST_NET=1 make test   # adds real providers and TLS failure cases
 make dist                     # dist/botter-<version>-linux-x86_64.tar.gz + .sha256
 ```

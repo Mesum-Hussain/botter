@@ -17,16 +17,17 @@ SQNC.md is the agent's program for a whole session: which skill and tool to use 
 Every agent with more than one step gets a SQNC.md in the project root. A one-shot agent does not need one.
 
 ## File format
-1. Frontmatter first, exactly like this (title in quotes; author and description optional):
+The whole file is one Sqnc block: plain English and Sqnc statements only, no Markdown (no # headings, no comments, no prose outside the block).
 
----
-spec-version: "sqnc-1"
-title: "Lead Outreach"
-author: "Sales team"
----
-
-2. Then the flow inside a fenced code block that starts with ```sqnc and ends with ``` (the fence keeps Markdown from turning steps into lists and headings, and keeps the indentation). Text outside ```sqnc blocks is documentation for people and is ignored; several ```sqnc blocks run in order, so you may explain a step in prose between two blocks.
-3. Inside the block: one statement per line. A line may start with a list number (`1.`) or `- `. `## STEP 1: NAME` lines are step labels, numbered in order. Indent block bodies by 4 spaces (END closes a block; indentation is not significant).
+1. First line: ```sqnc
+2. Then the frontmatter, exactly like this (title and description in quotes):
+   ---
+   spec-version: "sqnc-1"
+   title: "Lead Outreach"
+   description: "Find local businesses for the user's service and pitch each one, with approval."
+   ---
+3. Then the flow: one statement per line. A line may start with a list number (`1.`) or `- `. `STEP 1: NAME` lines are step labels, numbered in order. Indent block bodies by 4 spaces (END closes a block; indentation is not significant). Every line that is not a statement is an instruction for the agent, so do not write explanations for people in the flow: put them in the description.
+4. Last line: ```
 
 ## Statements (keywords in CAPITALS)
 - `LOAD SKILL "name"`  at the top, once per skill the flow uses (skills/name/SKILL.md must exist). Optional `FROM "./skills/name/SKILL.md"`.
@@ -46,7 +47,7 @@ author: "Sales team"
 Values: `"strings"`, numbers, `variables` and `variable.field` in backticks, joined with `+`. Conditions may use `IS EQUAL TO`, `IS NOT EQUAL TO`, `IS GREATER THAN`, `IS LESS THAN`, `IS EMPTY`, `IS NOT EMPTY`, `CONTAINS`, `AND`, `OR`, `NOT`, or plain English (`IF the user did not approve THEN`).
 
 ## What the build checks (errors stop the build)
-- frontmatter with spec-version "sqnc-1"; the flow inside a closed ```sqnc block
+- the file starts with ```sqnc, then the frontmatter with spec-version "sqnc-1", and ends with ```; no Markdown inside (# headings are errors; write STEP n: NAME)
 - every IF/FOR EACH/WHILE/RETRY/IN PARALLEL is closed by the right END; ELSE IF/ELSE only inside an IF, ELSE last
 - EXECUTE names a tool that exists; INVOKE names a skill that was LOADed; LOAD names a skill that exists
 - every `variable` is set before it is used; a FOR EACH item is not used after END FOR
@@ -66,18 +67,16 @@ Warnings: decisions or loops written in lowercase prose ("if no leads, stop": wr
 ## Example (the whole file)
 
 ````markdown
+```sqnc
 ---
 spec-version: "sqnc-1"
 title: "Lead Outreach"
+description: "Find local businesses for the user's service and pitch each one, with approval."
 ---
-
-Lead outreach: finds local businesses for the user's service and sends each one a specific pitch, with the user's approval.
-
-```sqnc
 LOAD SKILL "research-lead"
 LOAD SKILL "pitching"
 
-## STEP 1: GATHER
+STEP 1: GATHER
 1. ASK USER "What service do you offer, and to which kind of clients in which city?"
 2. SAVE answer INTO VARIABLE `target`
 3. RETRY UP TO 2 TIMES DO
@@ -88,7 +87,7 @@ LOAD SKILL "pitching"
        RETURN "No leads found; try a broader client type or city"
    END IF
 
-## STEP 2: OUTREACH
+STEP 2: OUTREACH
 FOR EACH `lead` IN `leads` DO
     INVOKE SKILL "research-lead" USING context `lead`
     SAVE skill_output INTO VARIABLE `facts`
@@ -107,7 +106,7 @@ FOR EACH `lead` IN `leads` DO
     SAVE `lead` TO FILE "state/outreach.json"
 END FOR
 
-## STEP 3: DONE
+STEP 3: DONE
 RETURN "Contacted leads: " + `leads.length`
 ```
 ````

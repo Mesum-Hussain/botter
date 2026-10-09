@@ -1,14 +1,10 @@
+```sqnc
 ---
 spec-version: "sqnc-1"
 title: "Botter Session"
 description: "Design an agent with the user, write its files, check them and build them into one .bot file."
 ---
 
-# Botter Session
-
-How Botter works with you: it asks what to build, plans it with you, writes the agent's files, checks them (syntax with the build, logic with an LLM review) and builds the `.bot`.
-
-```sqnc
 LOAD SKILL "create-agent"
 LOAD SKILL "project-layout"
 LOAD SKILL "write-agent-md-and-skills"
@@ -17,7 +13,7 @@ LOAD SKILL "write-flow"
 LOAD SKILL "wrap-existing-project"
 LOAD SKILL "build-agent"
 
-## STEP 1: UNDERSTAND
+STEP 1: UNDERSTAND
 1. ASK USER "What agent should I build? Tell me what it should do, for whom, and anything it must never do. (Or ask me a question.)"
 2. SAVE answer INTO VARIABLE `request`
 3. IF `request` is a question about Botter or agents rather than a request to build or change one THEN
@@ -40,7 +36,7 @@ LOAD SKILL "build-agent"
        INVOKE SKILL "wrap-existing-project" USING context { "request": `request`, "details": `details` }
    END IF
 
-## STEP 2: PLAN
+STEP 2: PLAN
 1. INVOKE SKILL "create-agent" USING context { "request": `request`, "details": `details` }
 2. INVOKE SKILL "project-layout" USING context { "request": `request`, "details": `details` }
 3. SAVE skill_output INTO VARIABLE `plan`
@@ -53,7 +49,7 @@ LOAD SKILL "build-agent"
        RETURN "Stopped: the plan was not approved. Tell me what you want and we can start again."
    END IF
 
-## STEP 3: WRITE
+STEP 3: WRITE
 1. INVOKE SKILL "write-agent-md-and-skills" USING context `plan`
 2. SET `tools` TO the tools in `plan` as a JSON array of {"name", "purpose"} objects, or [] if it has none
 3. FOR EACH `tool` IN `tools` DO
@@ -67,7 +63,7 @@ LOAD SKILL "build-agent"
        INVOKE SKILL "write-flow" USING context `plan`
    END IF
 
-## STEP 4: CHECK
+STEP 4: CHECK
 1. INVOKE SKILL "build-agent" USING context `plan`
 2. EXECUTE tool `agent_build` with payload { "dry_run": true }
 3. SAVE result INTO VARIABLE `check`
@@ -92,7 +88,7 @@ LOAD SKILL "build-agent"
        END IF
    END IF
 
-## STEP 5: BUILD
+STEP 5: BUILD
 1. EXECUTE tool `agent_build` with payload { "dry_run": false }
 2. SAVE result INTO VARIABLE `build`
 3. EXECUTE tool `agent_inspect` for the .bot file named in `build`

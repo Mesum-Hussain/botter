@@ -11,7 +11,7 @@ The project root is the folder the user started botter in. The built file is nam
 <agent>/
   agent.md             persona and behaviour = the agent's system prompt
   config.json          how to build and run the agent: name, version, internet, skills, tools ... (always write it; see "config.json" below)
-  SQNC.md              OPTIONAL (recommended for multi-step agents): the session flow in Sqnc: frontmatter + UPPERCASE statements, checked by the build, run by botcore at start-up (see write-flow)
+  SQNC.md              OPTIONAL (recommended for multi-step agents): the session flow in Sqnc: one ```sqnc block (frontmatter + UPPERCASE statements, no Markdown), checked by the build, run by botcore at start-up (see write-flow)
   skills/<name>/SKILL.md   task playbooks: how and when to use tools
   tools/                OPTIONAL
     bin/<name>          the runnable tool: native x86-64 ELF, or a script starting with #!

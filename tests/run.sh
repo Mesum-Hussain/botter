@@ -101,13 +101,18 @@ sq_bad "unclosed block" 'END FOR' '' 'this FOR EACH is never closed'
 sq_bad "IF without THEN" '"notes.txt" THEN' '"notes.txt"' 'IF reads: IF <condition> THEN'
 sq_bad "MCP CONNECT is rejected" 'LOAD SKILL "pitching"' 'LOAD SKILL "pitching"
 CONNECT mcp://x AS y' 'CONNECT \(MCP servers\) is not supported'
-sq_bad "OML v1 files are rejected" '---
-spec-version' '<!-- OML v1: x -->
----
-spec-version' 'uses the old OML v1 syntax'
-sq_bad "a flow outside a \`\`\`sqnc block is rejected" '```sqnc' '' 'no ```sqnc code block'
-sq_bad "an unclosed \`\`\`sqnc block is rejected" 'RETURN "Read " + `files.length` + " files"
-```' 'RETURN "Read " + `files.length` + " files"' 'is never closed with ```'
+sq_bad "the file must start with \`\`\`sqnc" '```sqnc
+---' '---' 'starts with ```sqnc on its first line; the frontmatter goes inside the block'
+sq_bad "the block must be closed" 'RETURN "Read " + `files.length` + " files"
+```' 'RETURN "Read " + `files.length` + " files"' 'never closed: end the file with ```'
+sq_bad "nothing may follow the block" 'RETURN "Read " + `files.length` + " files"
+```' 'RETURN "Read " + `files.length` + " files"
+```
+More text' 'nothing may follow the closing ```'
+sq_bad "Markdown step headings are rejected" 'STEP 1: GATHER' '## STEP 1: GATHER' 'write the step label as Sqnc, without #: STEP n: NAME'
+sq_bad "other Markdown is rejected" 'LOAD SKILL "pitching"' '# My flow
+LOAD SKILL "pitching"' 'Markdown \(headings, <!-- comments -->\) is not part of Sqnc'
+sq_bad "STEP labels are numbered in order" 'STEP 2: WORK' 'STEP 3: WORK' 'warning: STEP 3 follows STEP 1'
 sq_bad "decisions written as prose are a warning" 'Skip it.' 'if it is empty, skip it' "SQNC.md:17: warning: write 'if' as a Sqnc statement"
 
 # config.json: checked by the build, shown by list, --version, the start-up line and the system prompt

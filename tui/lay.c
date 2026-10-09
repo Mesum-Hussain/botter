@@ -693,12 +693,12 @@ static int id_char(char ch) { return isalnum((unsigned char)ch) || ch == '_' || 
 
 /*
  * Sqnc (botter SQNC.md): UPPERCASE keywords (EXECUTE, IF ... THEN, END FOR,
- * IS EQUAL TO ...), `variables`, "strings", numbers, list markers, STEP
+ * IS EQUAL TO ..., STEP n:), `variables`, "strings", numbers, list markers,
  * headings and frontmatter. Everything else is plain English.
  */
 static int sqnc_kw(const char *s, size_t n)
 {
-    static const char *const KW[] = {"LOAD", "SKILL", "FROM", "EXECUTE", "INVOKE", "USING", "SAVE", "INTO", "VARIABLE",
+    static const char *const KW[] = {"STEP", "LOAD", "SKILL", "FROM", "EXECUTE", "INVOKE", "USING", "SAVE", "INTO", "VARIABLE",
                                      "TO", "FILE", "SET", "ASK", "USER", "IF", "THEN", "ELSE", "END", "FOR", "EACH",
                                      "IN", "DO", "WHILE", "AT", "MOST", "TIMES", "RETRY", "UP", "PARALLEL", "RETURN",
                                      "IS", "EQUAL", "NOT", "GREATER", "LESS", "THAN", "EMPTY", "CONTAINS", "AND", "OR",
