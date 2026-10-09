@@ -611,9 +611,20 @@ static int cmd_build(const char *dir, const char *botcore, const char *out)
     if (!poff || !doff) {
         die("out of memory");
     }
+    size_t saved = 0;
     for (size_t i = 0; i < n_items; i++) {
         poff[i] = pos;
         pos += strlen(items[i].path) + 1;
+        /* identical content (e.g. one multi-call tool binary under several names) is stored once */
+        size_t j = 0;
+        while (j < i && !(items[j].len == items[i].len && memcmp(items[j].data, items[i].data, items[i].len) == 0)) {
+            j++;
+        }
+        if (j < i && items[i].len > 0) {
+            doff[i] = doff[j];
+            saved += items[i].len;
+            continue;
+        }
         doff[i] = pos;
         pos += items[i].len + 1;
     }
@@ -681,8 +692,12 @@ static int cmd_build(const char *dir, const char *botcore, const char *out)
     for (size_t i = 0; i < n_items; i++) {
         nexec += items[i].kind != K_DATA;
     }
-    fprintf(stderr, "botter_pack: wrote %s: %zu files (%zu tools), pack %llu bytes, total %llu bytes\n", out, n_items,
+    fprintf(stderr, "botter_pack: wrote %s: %zu files (%zu tools), pack %llu bytes, total %llu bytes", out, n_items,
             nexec, (unsigned long long)pos, (unsigned long long)(base + pos + FOOTER_SIZE));
+    if (saved) {
+        fprintf(stderr, " (%zu duplicate bytes stored once)", saved);
+    }
+    fputc('\n', stderr);
     return 0;
 }
 

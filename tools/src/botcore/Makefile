@@ -5,10 +5,14 @@
 # The agent packer (botter_pack) lives outside this repo.
 # TLS: vendored BearSSL (lib/bearssl, MIT) built as a static archive; CA anchors in lib/ca.
 
+# also drop compiler notes (Fedora annobin adds ~15KB) that plain strip keeps
+STRIP_NOTES ?= -R .comment -R .note.gnu.property -R .annobin.notes -R .gnu.build.attributes
+
 CC       ?= gcc
 CFLAGS   ?= -Os -ffunction-sections -fdata-sections -fno-asynchronous-unwind-tables
 LDFLAGS  ?= -Wl,--gc-sections
-WARN     = -std=gnu11 -Wall -Wextra -Wno-unused-parameter
+WARN     = -std=gnu11 -Wall -Wextra -Wno-unused-parameter -DBC_VERSION='"$(VERSION)"'
+VERSION  ?= $(shell cat $(dir $(lastword $(MAKEFILE_LIST)))../../../VERSION 2>/dev/null || echo dev)
 INC      = -Isrc -Ilib/cjson -Ilib/bearssl/inc -Ilib/ca
 BR_SRCS  = $(wildcard lib/bearssl/src/*.c lib/bearssl/src/*/*.c)
 BR_FLAGS = -Os -ffunction-sections -fdata-sections -fno-asynchronous-unwind-tables -Ilib/bearssl/inc -Ilib/bearssl/src
@@ -36,7 +40,7 @@ release: botcore-static
 
 botcore-static: $(OBJS_REL) obj-musl/libbearssl.a
 	musl-gcc $(CFLAGS) $(LDFLAGS) -static -o $@ $(OBJS_REL) obj-musl/libbearssl.a -lm
-	strip $@
+	strip $(STRIP_NOTES) $@
 
 obj-musl/libbearssl.a: $(patsubst %.c,obj-musl/%.o,$(BR_SRCS))
 	ar rcs $@ $^

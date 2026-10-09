@@ -389,9 +389,18 @@ static void run_due_schedules(chat_t *chat)
     }
 }
 
-int main(void)
+#ifndef BC_VERSION
+#define BC_VERSION "dev"
+#endif
+
+int main(int argc, char **argv)
 {
     chat_t chat;
+
+    if (argc > 1 && (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0)) {
+        printf("botcore %s (TLS: BearSSL; https://github.com/Mesum-Hussain/botter)\n", BC_VERSION);
+        return 0;
+    }
 
     /* Not dumpable: no core files, and other processes of this user cannot ptrace it or read
      * /proc/<pid>/mem (the API key lives in RAM). */

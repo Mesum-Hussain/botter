@@ -473,6 +473,9 @@ static void lay_header(blk_t *b, int cw)
     tl_blank(&info);
     l = tl_new(&info, TC_NONE);
     tl_put_trunc(l, title, "Botter", tw);
+    if (tw > 7 + (int)strlen(BOTTER_VERSION)) {
+        tl_put(l, mut, " " BOTTER_VERSION, strlen(" " BOTTER_VERSION));
+    }
     l = tl_new(&info, TC_NONE);
     tl_put_trunc(l, mut, "the agent that builds agents", tw);
     tl_blank(&info);
@@ -2061,10 +2064,18 @@ static void dump_transcript(void)
     tsb_free(&o);
 }
 
+#ifndef BOTTER_VERSION
+#define BOTTER_VERSION "dev"
+#endif
+
 int main(int argc, char **argv)
 {
     if (argc == 4 && strcmp(argv[1], "--bundle") == 0) {
         return bundle(argv[2], argv[3]);
+    }
+    if (argc > 1 && (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0)) {
+        printf("Botter %s\n", BOTTER_VERSION);
+        return 0;
     }
     if (argc > 1 && (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0)) {
         printf("usage: %s [agent.bot]        run (default: the embedded agent)\n"
