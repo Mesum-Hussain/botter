@@ -11,7 +11,7 @@ Legend: [D]=owner decided, [R]=recommendation (unapproved), [S]=spike needed, P0
 ```
 agent.md      persona -> system prompt; tells LLM to follow flow.md
 (no manifest.md [D 2026-10-09]: botcore lists skills (SKILL.md frontmatter description) + tools/doc/*.md in the system prompt at startup; tool schemas from tools/doc/*.json; packer warns on a leftover manifest.md and does not embed it)
-flow.md       OPTIONAL session flow in OML v1 (see §3b)
+flow.md       OPTIONAL session flow in OML v2 (see §3b)
 agent.json    OPTIONAL {"offline": true}; absent = online
 skills/<n>/SKILL.md   playbooks (frontmatter name/description)
 tools/bin/<name>      ELF x86-64 or #! script;  tools/doc/<name>.json REQUIRED {description, parameters, timeout_s<=600, network}
