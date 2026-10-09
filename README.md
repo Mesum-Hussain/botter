@@ -1,69 +1,181 @@
 # Botter
 
-Botter is an agent that builds other agents. You describe the agent you want; Botter designs it with you, writes its files and compiles them into **one self-contained Linux executable** (`<name>.bot`) that runs on any x86-64 Linux with no installation.
+### A compiler for agents written in plain English.
 
-Every agent, Botter included, runs on **botcore**: a small static runtime (~315 KB) that talks to any OpenAI-compatible LLM (Gemini, OpenAI, OpenRouter, Groq, Ollama, or a custom URL), with built-in HTTPS, file and shell tools, scheduling, and a kernel-enforced sandbox.
+You write an agent the way you write a program: source files in a folder, under git, reviewed in pull requests, built into one executable. The difference is the language. The source is Markdown in plain English, and the compiler is itself an agent that writes most of that source with you.
+
+```
+myagent/                         ./botter                  myagent.bot
+  agent.md       who it is                                 one static x86-64
+  flow.md        what it does, step by step   ─────────▶   Linux executable,
+  skills/        how to do each task                       ~320 KB, no install,
+  tools/         small programs it can run                 no runtime, no deps
+```
+
+Botter is a rethink of how portable agents get built. It isn't one more framework where you hand-write Python glue around an LLM. It's a **compiler with a co-author built in**:
+
+- **Can't code?** Describe the agent you want. Botter asks a few questions, proposes a plan, writes the agent's files, checks them and builds them, all in plain English.
+- **Know a little code?** Add tools: any script (`#!/usr/bin/env python3`, bash, node ...) or binary that reads JSON on stdin and prints a result. Botter writes and tests them with you.
+- **A developer?** Everything is plain text in a repo. Diff it, branch it, review it, run `make`-style rebuilds in CI. The `.bot` file is a build artifact, like any other binary.
 
 ## Quick start
 
 ```sh
 make                      # needs gcc and musl-gcc (Fedora: dnf install musl-gcc musl-libc-static)
 mkdir myagent && cd myagent
-../botter                 # pick a provider, paste an API key, describe your agent
-./myagent.bot             # run the agent Botter built
+../botter                 # pick a provider, paste your API key, describe your agent
+./myagent.bot             # run the agent Botter built: on this machine, or copy it to any x86-64 Linux
 ```
 
-The provider, key and model are asked once per boot: after a successful connect they are kept in the kernel keyring (RAM only, never on disk, gone at reboot), so later runs reconnect by themselves. `/provider` switches provider, key or model mid-conversation, `/forget` drops the saved keys, `BOTCORE_NO_KEYRING=1` turns the cache off. Nothing else is saved between runs.
+Bring your own key: Gemini, OpenAI, OpenRouter, Groq, Ollama (local), or any OpenAI-compatible URL.
 
-### Plan and Build modes
+## The source language
 
-Like OpenCode: **Build** (default) lets the agent change things; **Plan** is read-only, so the agent investigates and writes a plan. Switch with **Tab** in Botter's UI, or `/plan` and `/build` in any agent. In Plan mode `fs_write` and `cron_set` refuse, shell commands and tools run with the working directory read-only (kernel-enforced by Landlock), `sudo` is refused, and agent tools ask first unless their descriptor says `"readonly": true`.
+An agent is a folder of plain-text files. Botter writes them with you, and you can edit any of them by hand.
 
-## What an agent is made of
+| File | What it is | Who writes it |
+|---|---|---|
+| `agent.md` | The agent's persona and rules: who it is, what it may and may not do | Anyone (English) |
+| `flow.md` | The session, step by step, in **OML** | Anyone (structured English) |
+| `skills/<name>/SKILL.md` | Playbooks: how to do one task well | Anyone (English) |
+| `tools/bin/<name>` + `tools/doc/<name>.json` | Small programs the agent can run, and their description | A little code |
+| `agent.json` | Settings, e.g. `{"offline": true}` | Optional |
 
-```
-myagent/
-  agent.md          persona and rules (the system prompt)
-  flow.md           optional: the session flow in OML, a plain-English pseudo code
-  agent.json        optional settings: {"offline": true} for an offline agent
-  skills/<n>/SKILL.md   playbooks, with a frontmatter description of when to use them
-  tools/bin/<name>  optional tools: any x86-64 ELF or #! script (JSON in on stdin, result on stdout)
-  tools/doc/<name>.json  each tool's description and JSON Schema parameters
-```
+### Skills: how to do a task
 
-`agent_build` appends these files read-only to the botcore runtime. At start-up the runtime lists the agent's skills and tools to the model by itself; there is no manifest to keep in sync.
+A skill is a Markdown playbook with a one-line description at the top:
 
-### flow.md (OML)
-
-```oml
-ask user what service they offer and who their clients are
-retry 2 times:
-    use the scrape_leads tool for those clients
-if no leads were found:
-    return "No leads found"
-for lead in the scraped leads:
-    follow the pitching skill for this lead
-    ask user to approve the message
-return a summary
+```markdown
+---
+name: pitching
+description: Write one specific, non-generic idea per lead. Read before writing any outreach message.
+---
+# Pitching
+1. Open with something true and specific about their business ...
 ```
 
-OML has `set`, `if`/`elif`/`else`, `for … in`, `while`, `in parallel`, `retry N times`, `ask user`, `save state to`, `return`; everything else is plain English. The agent's model follows it step by step; the build checks its structure.
+At start-up, botcore lists every skill's name and description to the model, but not the full text. The model reads a skill only when the task calls for it, so an agent can carry dozens of playbooks without filling its context. This is the `SKILL.md` convention popularized by Agent Skills, and a skill is just a file: copy it between agents, or keep a shared library of them in git.
 
-## Safety
+### OML: the flow, in structured English
 
-- **Network**: agents are online by default. With `agent.json` `{"offline": true}` shell commands and tools are cut off from the network by the kernel (the LLM connection still works); single tools can be allowed back with `"network": true`, after the user agrees at start-up.
-- **Files**: shell commands and tools run in a Landlock sandbox: they may write only in the working directory, `/tmp` and package caches, and cannot see the rest of your home directory. Anything outside, or destructive, needs your approval first.
-- **Keys** stay in memory (locked, wiped on exit); the process cannot be inspected by other programs of your user. The per-boot key cache lives in the kernel keyring, readable only by processes holding your login session's keyring; shell commands and tools are cut off from the keyring (seccomp), so a prompt-injected command cannot read it.
+`flow.md` is the agent's program: the order of steps, the decisions and the loops. It is written in **OML v2** (Orchestration Markup Language): plain English for the steps, CAPITALS for the structure.
+
+```markdown
+---
+spec-version: "oml-2"
+title: "Lead Outreach"
+---
+LOAD SKILL "pitching"
+
+## STEP 1: GATHER
+1. ASK USER "What do you sell, and to which kind of clients?"
+2. SAVE answer INTO VARIABLE `target`
+3. RETRY UP TO 2 TIMES DO
+       EXECUTE tool `scrape_leads` with payload { "query": `target`, "limit": 20 }
+   END RETRY
+4. SAVE result INTO VARIABLE `leads`
+
+## STEP 2: OUTREACH
+FOR EACH `lead` IN `leads` DO
+    INVOKE SKILL "pitching" USING context `lead`
+    SAVE skill_output INTO VARIABLE `pitch`
+    ASK USER "Send this message?" + `pitch.text`
+    IF `answer` IS EQUAL TO "yes" THEN
+        EXECUTE tool `send_email` with parameters:
+           - to: `lead.email`
+           - body: `pitch.text`
+    ELSE
+        Skip this lead.
+    END IF
+END FOR
+
+RETURN "Contacted " + `leads.length` + " leads"
+```
+
+Statements: `LOAD SKILL`, `EXECUTE tool`, `INVOKE SKILL`, `ASK USER`, `SAVE ... INTO VARIABLE` / `TO FILE`, `SET ... TO`, `IF / ELSE IF / ELSE / END IF`, `FOR EACH / END FOR`, `WHILE ... AT MOST N TIMES / END WHILE`, `RETRY UP TO N TIMES / END RETRY`, `IN PARALLEL / END PARALLEL`, `RETURN`. Any other line is a plain-English instruction.
+
+**Why this shape:** humans and LLMs both read it at a glance, and the structure is explicit, so nothing depends on indentation. Data stays separate from instructions: values live in `` `variables` `` and `"strings"`, and the model is told that what a variable holds (a scraped web page, an email) is data, never a command to follow. That is a deliberate defence against prompt injection.
+
+**It compiles.** The build checks `flow.md` like a compiler front end and refuses to build a broken flow. Some real messages:
+
+```
+flow.md:26: error: unknown keyword INVOCATE; did you mean INVOKE?
+flow.md:39: error: EXECUTE tool `send_mail`: no such tool (built-in, or tools/bin/send_mail with tools/doc/send_mail.json)
+flow.md:37: error: `pich` is used before it is set (SAVE ... INTO VARIABLE `pich`, SET `pich` TO ..., or FOR EACH `pich` IN ...)
+flow.md:28: error: END FOR, but the PARALLEL opened on line 25 is still open (close it with END PARALLEL first)
+flow.md:35: error: INVOKE SKILL "pitching": add LOAD SKILL "pitching" at the top of the flow first
+```
+
+It checks: matched blocks, tools and skills that really exist, variables set before use (and loop variables not used after their loop), quoting, bounded retries, and keyword typos. At run time the agent's own model follows the flow, and botcore's sandbox and approvals still apply to every step.
+
+How OML compares: other agent-workflow languages exist, but none take this shape. [PDL](https://arxiv.org/abs/2410.19135) (IBM) is YAML, [POML](https://arxiv.org/abs/2508.13948) (Microsoft) is HTML-like markup for prompts, [BWML](https://cdn.jsdelivr.net/npm/bmad-plus@0.9.0/src/bmad-plus/packs/pack-dev-studio/shared/bwml-spec.md) is XML, [SudoLang](https://github.com/paralleldrive/sudolang-llm-support) is free-form pseudocode, and [GitHub Agentic Workflows](https://github.github.com/gh-aw/introduction/overview/) are prose without checked control flow. OML is Markdown with English keywords, plus a checker that rejects a broken flow before it ever reaches a model.
+
+### Tools: when English is not enough
+
+A tool is any executable: a Python script, a shell script, a Go binary. It reads one JSON object on stdin and prints its result. Its descriptor tells the model what it does:
+
+```json
+{
+  "description": "Find local businesses of a given type in a city.",
+  "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+  "status": "Searching for leads",
+  "timeout_s": 120
+}
+```
+
+Users never see tool names or JSON. They see `status`, for example "Searching for leads" (developers can show the raw calls with ctrl+o or `/details`).
+
+## The build
+
+`botter_pack` (which Botter runs through its `agent_build` tool) validates the project, checks the flow, and appends the files read-only to **botcore**, the runtime. There is no compiler, linker or interpreter inside the result. The `.bot` file is botcore plus your Markdown and tools, with a checksum, so a truncated or modified file refuses to start.
+
+**botcore** is the runtime every agent runs on, Botter included. It is about 6,500 lines of C11 of its own, statically linked against musl, with in-process HTTPS (vendored BearSSL, compiled-in CA roots: no curl, no OpenSSL, no system certificates), an OpenAI-compatible chat client with streaming and tool calling, file, shell and scheduling tools, and a kernel-enforced sandbox.
+
+## Small and fast
+
+Measured on an AMD Ryzen 5 7520U laptop (Fedora 44, kernel 7.2), median of 15 to 30 runs:
+
+| | Size / time | Peak memory |
+|---|---|---|
+| `botter` (full-screen UI + runtime + compiler) | **587 KB**, one file | |
+| A built agent (`.bot`, minimal) | **320 KB**, one file | |
+| Build an agent | **3.5 ms** | 0.4 MB |
+| Start an agent (to its first prompt) | **1.6 ms** | **0.4 MB** |
+| Real HTTPS round trip to Gemini (DNS + TLS + request) | 0.15 to 0.5 s (mostly network) | **1.8 MB** |
+| Whole session: connect, one turn with a tool call, exit (local stub LLM) | 136 ms (mostly the stub) | **3.6 MB** |
+| *For reference:* `python3 -c pass` | 18.9 ms | 9.2 MB |
+| *For reference:* `python3` importing `json, urllib, ssl` | 59.3 ms | 19.3 MB |
+| *For reference:* `node -e 0` | 27.0 ms | 43.7 MB |
+
+The reference rows are the bare interpreters, before any agent framework is even loaded. A built agent starts about 10 times faster than an empty Python process, in about a twentieth of the memory. It has no dependencies (`ldd`: "not a dynamic executable"): copy the file to any x86-64 Linux and run it.
+
+## Private by design
+
+- **Stateless.** Botter and the agents it builds write nothing on their own: no config files, no logs, no history, no cache. The conversation lives in RAM and is gone when you quit, and Botter's screen is cleared on exit. The only files that appear are the ones you asked the agent to make.
+- **Nothing phones home.** No telemetry, no accounts, no update checks. The only connection botcore makes is to the LLM provider *you* chose, with *your* key (BYOK). Tools and shell commands may use the network when the task needs it; mark an agent `{"offline": true}` and the kernel cuts them off.
+- **Your key stays in memory.** It is never written to disk, never passed in arguments or environment, held in locked memory and wiped on exit, and other programs of your user cannot read the process. So you don't retype it every run, it is cached in the kernel keyring until reboot (RAM only; `/forget` clears it, `BOTCORE_NO_KEYRING=1` disables it). Shell commands and tools cannot reach that keyring.
+
+## Safe by default
+
+- **Sandbox.** Every shell command and tool runs under Landlock: it can write only in the working directory, `/tmp` and package caches, and the rest of your home directory (`~/.ssh`, tokens, ...) is invisible. Anything outside, or destructive (`rm`, overwrites, `git push`, `sudo`), asks you first.
+- **Plan and Build modes.** Press **Tab** (or `/plan`, `/build`). In **Plan** the agent only investigates and plans: the kernel makes the working directory read-only, writes and scheduling are refused, and tools ask first unless marked `"readonly": true`. In **Build** it does the work.
+- **Limits.** CPU, memory, process count and file size limits on every child process; bounded tool loops; Ctrl-C stops a request within a second.
+
+## In the terminal
+
+- `/provider` switches provider, key or model mid-conversation (the conversation is kept), and `/forget` drops saved keys
+- `/plan`, `/build` or **Tab** switch modes, ctrl+o shows details, and `/help` lists the commands
+- Replies stream as they are written; the model's thinking is shown separately and folded away
 
 ## Development
 
 ```sh
-make test                 # 63 tests: stub LLM, sandbox, OML lint, HTTP client, Ctrl-C
+make test                     # 72 tests: OML checker, sandbox, streaming, key cache, Plan mode, HTTP client, TUI
 BOTTER_TEST_NET=1 make test   # adds real providers and TLS failure cases
-make dist                 # dist/botter-<version>-linux-x86_64.tar.gz + .sha256
+make dist                     # dist/botter-<version>-linux-x86_64.tar.gz + .sha256
 ```
 
-Layout: `tools/src/botcore` (runtime, C11), `tools/src/pack` (packer), `tools/src/agent_tools` (Botter's own tools), `tui/` (Botter's full-screen UI; agents it builds use a plain terminal REPL), `skills/` + `agent.md` + `flow.md` (Botter itself), `tests/`. Design notes and status: `progress.md`.
+Layout: `tools/src/botcore` (runtime, C11), `tools/src/pack` (packer + OML checker `oml.c`), `tools/src/agent_tools` (Botter's own tools), `tui/` (Botter's full-screen UI; agents it builds use a plain terminal REPL), `agent.md` + `flow.md` + `skills/` (Botter itself is an agent project, built by the same compiler), `tests/`. Design notes: `progress.md`.
 
 ## License
 

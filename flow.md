@@ -1,58 +1,84 @@
-<!-- OML v1: Write workflows in plain English with 4-space indentation. Use `set name = value` for variables; `if`/`elif`/`else` for branches (`elif`/`else` attach to the nearest unfinished `if`); `for item in collection:` for iteration; `while condition:` for repetition; `in parallel:` for concurrent tasks; `retry N times:` for bounded retries; `ask user` for input/approval; `save state to "name"` for checkpoints; and `return value` to finish. Conditions and actions may be plain English. Structural keywords are `set`, `if`, `elif`, `else`, `for`, `in`, `while`, `return`; other directives are recognized as phrases. Only use manifest-declared capabilities. The runtime must enforce permissions, approvals, iteration/resource limits, and safe failure; never execute arbitrary code or guess ambiguous instructions. -->
+---
+spec-version: "oml-2"
+title: "Botter Session"
+author: "Botter"
+description: "Design an agent with the user, write its files, check and build it into one .bot file."
+---
 
-# Botter Session Flow
+# Botter Session
 
-```oml
-read skills/create-agent/SKILL.md
-set request = the user's first message
+LOAD SKILL "create-agent"
+LOAD SKILL "project-layout"
+LOAD SKILL "write-agent-md-and-skills"
+LOAD SKILL "write-tool"
+LOAD SKILL "write-flow"
+LOAD SKILL "wrap-existing-project"
+LOAD SKILL "build-agent"
 
-if the request is a question about botter or agents:
-    answer it briefly
-    return the answer
+## STEP 1: UNDERSTAND
+1. INVOKE SKILL "create-agent" USING context "the user's first message"
+2. IF the first message is a question about Botter or agents THEN
+       Answer it briefly.
+       RETURN "the answer"
+   END IF
+3. EXECUTE tool `fs_list` with payload { "path": "." }
+4. SAVE result INTO VARIABLE `existing`
+5. IF `existing` has agent.md or skills/ THEN
+       SET `mode` TO "edit"
+       Read agent.md, agent.json, flow.md and the skills that are there.
+   ELSE
+       SET `mode` TO "new"
+   END IF
+6. ASK USER "Up to 3 short questions about purpose, users, limits and existing code, each with a proposed default"
+7. SAVE answer INTO VARIABLE `needs`
+8. IF `needs` asks for an existing repository THEN
+       INVOKE SKILL "wrap-existing-project" USING context `needs`
+       IF the repository is not on disk THEN
+           EXECUTE tool `shell_exec` with payload { "command": "git clone <repo> artifacts/<name>" }
+       END IF
+   END IF
 
-use fs_list on the working directory
-if agent.md or skills already exist:
-    set mode = "edit"
-    read agent.md, agent.json, flow.md and the skills that are there
-else:
-    set mode = "new"
+## STEP 2: PLAN
+1. INVOKE SKILL "project-layout" USING context `needs`
+2. SAVE skill_output INTO VARIABLE `plan`
+3. RETRY UP TO 3 TIMES DO
+       ASK USER "Here is the plan (agent.md, skills, tools, flow.md). Approve it, or say what to change." + `plan`
+       IF `answer` is not an approval THEN
+           Revise `plan` with the user's changes.
+       END IF
+   END RETRY
+4. IF the plan is still not approved THEN
+       RETURN "Stopped: the plan was not approved"
+   END IF
 
-ask user up to 3 short questions about purpose, users, limits and existing code, proposing defaults
-if the user wants an offline agent:
-    set offline = true
-if the agent should wrap an existing repo:
-    follow the wrap-existing-project skill
-    if the repo is not on disk:
-        use shell_exec to git clone it into artifacts/
+## STEP 3: WRITE
+1. INVOKE SKILL "write-agent-md-and-skills" USING context `plan`
+2. FOR EACH `tool` IN `plan.tools` DO
+       INVOKE SKILL "write-tool" USING context `tool`
+       RETRY UP TO 3 TIMES DO
+           EXECUTE tool `shell_exec` with payload { "command": "test the tool by hand with realistic stdin JSON" }
+       END RETRY
+       IF the tool still fails THEN
+           ASK USER "This tool keeps failing. How should I proceed?" + `tool.name`
+       END IF
+   END FOR
+3. IF `needs` asks for an offline agent THEN
+       EXECUTE tool `fs_write` with payload { "path": "agent.json", "content": "{\"offline\": true}" }
+   END IF
+4. IF the agent has more than one step THEN
+       INVOKE SKILL "write-flow" USING context `plan`
+   END IF
 
-show the user the plan: agent.md, skills, tools, flow.md
-ask user to approve the plan
-if the user does not approve:
-    revise the plan with the user's changes and ask again, at most 3 times
-    if the plan is still not approved:
-        return "Stopped: plan not approved"
-
-follow the write-agent-md-and-skills skill to write agent.md and the skills with fs_write
-if the agent needs tools:
-    for tool in the planned tools:
-        follow the write-tool skill to write tools/bin and tools/doc for this tool
-        retry 3 times:
-            test the tool by hand with shell_exec and realistic stdin JSON
-        if the tool still fails:
-            ask user how to proceed with this tool
-if offline is true:
-    write agent.json with {"offline": true}
-if the agent has more than one step:
-    follow the write-flow skill to write flow.md
-
-retry 5 times:
-    use the agent_build tool with dry_run true
-    fix every error and every flow.md warning it reports
-if errors remain:
-    return the remaining errors and what the user can do
-
-use the agent_build tool
-use the agent_inspect tool on the built .bot
-save state to "build"
-return the file name, size, how to run it, what it asks at startup and what must be installed or running
-```
+## STEP 4: BUILD
+1. INVOKE SKILL "build-agent" USING context `plan`
+2. RETRY UP TO 5 TIMES DO
+       EXECUTE tool `agent_build` with payload { "dry_run": true }
+       Fix every error and warning it reports, including flow.md errors.
+   END RETRY
+3. IF errors remain THEN
+       RETURN "the remaining errors and what the user can do about them"
+   END IF
+4. EXECUTE tool `agent_build` with payload { "dry_run": false }
+5. EXECUTE tool `agent_inspect` with payload { "file": "<name>.bot" }
+6. SAVE result INTO VARIABLE `build`
+7. RETURN "the file name, its size, how to run it, what it asks at startup and what must be installed or running"

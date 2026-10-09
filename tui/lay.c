@@ -692,101 +692,85 @@ static int is_kw(const char *s, size_t n)
 static int id_char(char ch) { return isalnum((unsigned char)ch) || ch == '_' || (unsigned char)ch >= 0x80; }
 
 /*
- * OML v1 (botter flow.md): structural keywords (set if elif else for in while
- * return), directive phrases at the start of a statement (in parallel, retry N
- * times, ask user, save state to), the variable after `set`, strings, numbers.
- * Everything else is plain English.
+ * OML v2 (botter flow.md): UPPERCASE keywords (EXECUTE, IF ... THEN, END FOR,
+ * IS EQUAL TO ...), `variables`, "strings", numbers, list markers, STEP
+ * headings and frontmatter. Everything else is plain English.
  */
-static int word_is(const char *s, size_t n, size_t i, const char *w)
+static int oml_kw(const char *s, size_t n)
 {
-    size_t wl = strlen(w);
-    return i + wl <= n && strncmp(s + i, w, wl) == 0 && (i + wl == n || !id_char(s[i + wl]));
+    static const char *const KW[] = {"LOAD", "SKILL", "FROM", "EXECUTE", "INVOKE", "USING", "SAVE", "INTO", "VARIABLE",
+                                     "TO", "FILE", "SET", "ASK", "USER", "IF", "THEN", "ELSE", "END", "FOR", "EACH",
+                                     "IN", "DO", "WHILE", "AT", "MOST", "TIMES", "RETRY", "UP", "PARALLEL", "RETURN",
+                                     "IS", "EQUAL", "NOT", "GREATER", "LESS", "THAN", "EMPTY", "CONTAINS", "AND", "OR",
+                                     "CONNECT", "AS", NULL};
+    for (int k = 0; KW[k]; k++) {
+        if (strlen(KW[k]) == n && strncmp(KW[k], s, n) == 0) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static void oml_line(tcells_t *c, const char *s, size_t n)
 {
     uint32_t B = T.code_bg;
     tsty_t plain = sty_bg(T.text, B, 0), kw = sty_bg(T.kw, B, TA_BOLD), str = sty_bg(T.str, B, 0),
-           num = sty_bg(T.num, B, 0), dir = sty_bg(T.fn, B, TA_BOLD), var = sty_bg(T.info, B, 0),
+           num = sty_bg(T.num, B, 0), head = sty_bg(T.fn, B, TA_BOLD), var = sty_bg(T.info, B, 0),
            mut = sty_bg(T.muted, B, 0);
     size_t i = 0;
     while (i < n && s[i] == ' ') {
         i++;
     }
     tc_add(c, s, i, plain);
-    static const char *const STRUCT[] = {"set", "if", "elif", "else", "for", "while", "return", NULL};
-    static const char *const PHRASE[] = {"in parallel", "ask user", "save state to", NULL};
-    int is_set = 0, is_for = 0;
-    for (int k = 0; STRUCT[k]; k++) {
-        if (word_is(s, n, i, STRUCT[k])) {
-            size_t wl = strlen(STRUCT[k]);
-            tc_add(c, s + i, wl, kw);
-            is_set = k == 0;
-            is_for = k == 4;
-            i += wl;
-            break;
-        }
+    if (i < n && (s[i] == '#' || (n - i >= 3 && !strncmp(s + i, "---", 3)))) { /* heading / frontmatter fence */
+        tc_add(c, s + i, n - i, s[i] == '#' ? head : mut);
+        return;
     }
-    for (int k = 0; PHRASE[k] && i < n; k++) {
-        if (word_is(s, n, i, PHRASE[k])) {
-            size_t wl = strlen(PHRASE[k]);
-            tc_add(c, s + i, wl, dir);
-            i += wl;
-            break;
-        }
+    size_t j = i;
+    while (j < n && isdigit((unsigned char)s[j])) {
+        j++;
     }
-    if (word_is(s, n, i, "retry")) { /* retry N times */
-        size_t j = i + 5;
-        while (j < n && (s[j] == ' ' || isalnum((unsigned char)s[j]))) {
-            j++;
-        }
-        tc_add(c, s + i, j - i, dir);
-        i = j;
-    }
-    if (is_set) { /* set <name> = */
-        size_t j = i;
-        while (j < n && s[j] == ' ') {
-            j++;
-        }
-        size_t k = j;
-        while (k < n && (id_char(s[k]) || s[k] == '.')) {
-            k++;
-        }
-        tc_add(c, s + i, j - i, plain);
-        tc_add(c, s + j, k - j, var);
-        i = k;
+    if (j > i && j < n && s[j] == '.') { /* "1." list marker */
+        tc_add(c, s + i, j + 1 - i, mut);
+        i = j + 1;
+    } else if (i + 1 < n && s[i] == '-' && s[i + 1] == ' ') {
+        tc_add(c, s + i, 1, mut);
+        i++;
     }
     while (i < n) {
         char ch = s[i];
-        /* a ' right after a letter is an apostrophe (the user's), not a string */
-        if (ch == '"' || (ch == '\'' && (i == 0 || !id_char(s[i - 1])))) {
-            size_t j = i + 1;
-            while (j < n && s[j] != ch) {
-                j++;
+        if (ch == '"') {
+            size_t e = i + 1;
+            while (e < n && s[e] != '"') {
+                e += s[e] == '\\' && e + 1 < n ? 2 : 1;
             }
-            size_t end = j < n ? j + 1 : n;
-            tc_add(c, s + i, end - i, str);
-            i = end;
+            e = e < n ? e + 1 : n;
+            tc_add(c, s + i, e - i, str);
+            i = e;
+        } else if (ch == '`') {
+            size_t e = i + 1;
+            while (e < n && s[e] != '`') {
+                e++;
+            }
+            e = e < n ? e + 1 : n;
+            tc_add(c, s + i, e - i, var);
+            i = e;
         } else if (isdigit((unsigned char)ch) && (i == 0 || !id_char(s[i - 1]))) {
-            size_t j = i;
-            while (j < n && isdigit((unsigned char)s[j])) {
-                j++;
+            size_t e = i;
+            while (e < n && isdigit((unsigned char)s[e])) {
+                e++;
             }
-            tc_add(c, s + i, j - i, num);
-            i = j;
+            tc_add(c, s + i, e - i, num);
+            i = e;
         } else if (id_char(ch)) {
-            size_t j = i;
-            while (j < n && id_char(s[j])) {
-                j++;
+            size_t e = i;
+            while (e < n && id_char(s[e])) {
+                e++;
             }
-            int k = (is_for && j - i == 2 && !strncmp(s + i, "in", 2)) || (j - i == 3 && !strncmp(s + i, "not", 3)) ||
-                    (j - i == 3 && !strncmp(s + i, "and", 3)) || (j - i == 2 && !strncmp(s + i, "or", 2)) ||
-                    (j - i == 2 && !strncmp(s + i, "is", 2));
-            tc_add(c, s + i, j - i, k ? kw : plain);
-            i = j;
-        } else if ((ch == ':' && i + 1 == n) || ch == '=') {
-            tc_add(c, s + i, 1, mut);
-            i++;
+            int k = oml_kw(s + i, e - i) || (e - i == 4 && !strncmp(s + i, "tool", 4) && i >= 8 &&
+                                             !strncmp(s + i - 8, "EXECUTE ", 8));
+            tc_add(c, s + i, e - i, k ? kw : plain);
+            i = e;
         } else {
             int l;
             tu_decode(s + i, n - i, &l);

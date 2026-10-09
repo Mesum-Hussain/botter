@@ -68,30 +68,46 @@ mkagent() {
 }
 build() { "$PACK" build "$1" "$CORE" "$2" >"$T/build.log" 2>&1; }
 
-OML_HDR=$(sed -n '/^<!-- OML v1: Write/p' "$ROOT/skills/write-flow/SKILL.md")
-
 # ---------------------------------------------------------------------------
-section "Packaging and OML lint"
+section "Packaging and OML v2"
 
 "$PACK" check "$ROOT" "$CORE" >"$T/self.log" 2>&1
 check "botter's own project builds with 0 warnings" "$T/self.log" "check passed: .* 0 warning"
 
+# OML v2 (flow.md): a valid flow compiles; each kind of mistake is an error with its line and stops the build
 mkagent "$T/flow_good"
-printf '%s\n\n# Flow\n\n```python oml\nset x = 1\nif x is 1:\n    ask user to confirm\nelse:\n    return "no"\nfor lead in leads:\n    retry 3 times:\n        send it\nreturn x\n```\n' "$OML_HDR" >"$T/flow_good/flow.md"
+mkdir -p "$T/flow_good/skills/pitching"
+printf -- '---\nname: pitching\ndescription: p\n---\n' >"$T/flow_good/skills/pitching/SKILL.md"
+cp "$TESTS/oml_good.md" "$T/flow_good/flow.md"
 "$PACK" check "$T/flow_good" "$CORE" >"$T/lint.log" 2>&1
-check_not "valid fenced flow.md has no flow warnings" "$T/lint.log" "flow.md"
-
-mkagent "$T/flow_bad"
-printf '%s\n\n# Flow\n\n```oml\nif broken\n    x\nelif later:\n  y\n```\n' "$OML_HDR" >"$T/flow_bad/flow.md"
-"$PACK" check "$T/flow_bad" "$CORE" >"$T/lint.log" 2>&1
-check "missing ':' reported with its file line" "$T/lint.log" "flow.md line 6: if/elif/else/for/while lines must end"
-check "unexpected indent reported" "$T/lint.log" "line 7: unexpected indent"
-check "bad indentation reported" "$T/lint.log" "line 9: indentation must be a multiple of 4"
-
-mkagent "$T/flow_nofence"
-printf '%s\n\n# Flow\n\nset x = 1\n' "$OML_HDR" >"$T/flow_nofence/flow.md"
-"$PACK" check "$T/flow_nofence" "$CORE" >"$T/lint.log" 2>&1
-check "unfenced flow.md warns about the fence" "$T/lint.log" "inside a \`\`\`oml fenced block"
+check_not "OML v2: a valid flow.md has no errors or warnings" "$T/lint.log" "flow.md"
+# oml_bad NAME OLD NEW PATTERN: oml_good.md with OLD replaced by NEW must report PATTERN
+oml_bad() {
+    rm -rf "$T/flow_bad" "$T/flow_bad.bot"
+    cp -r "$T/flow_good" "$T/flow_bad"
+    python3 -c 'import sys;p=sys.argv[1];s=open(p).read();assert sys.argv[2] in s;open(p,"w").write(s.replace(sys.argv[2],sys.argv[3],1))' \
+        "$T/flow_bad/flow.md" "$2" "$3"
+    "$PACK" build "$T/flow_bad" "$CORE" "$T/flow_bad.bot" >"$T/lint.log" 2>&1
+    check "OML v2: $1" "$T/lint.log" "$4"
+}
+oml_bad "keyword typo is an error with its line" 'INVOKE SKILL' 'INVOCATE SKILL' 'flow.md:14: error: unknown keyword INVOCATE; did you mean INVOKE'
+if [ -e "$T/flow_bad.bot" ]; then fail "OML v2: a flow with errors is not built"; else pass "OML v2: a flow with errors is not built"; fi
+oml_bad "unknown tool" '`fs_read`' '`fs_reed`' 'no such tool'
+oml_bad "skill used without LOAD SKILL" 'LOAD SKILL "pitching"' '' 'add LOAD SKILL "pitching"'
+oml_bad "variable used before it is set" '`folder` }' '`fodler` }' '`fodler` is used before it is set'
+oml_bad "loop variable used after its loop" 'RETURN "Read "' 'RETURN `f.name` + "Read "' 'only exists inside its FOR EACH'
+oml_bad "mismatched END" '        END RETRY' '        END IF' 'END IF, but the RETRY opened on line 18 is still open'
+oml_bad "unclosed block" 'END FOR' '' 'this FOR EACH is never closed'
+oml_bad "IF without THEN" '"notes.txt" THEN' '"notes.txt"' 'IF reads: IF <condition> THEN'
+oml_bad "MCP CONNECT is rejected" 'LOAD SKILL "pitching"' 'LOAD SKILL "pitching"
+CONNECT mcp://x AS y' 'CONNECT \(MCP servers\) is not supported'
+oml_bad "OML v1 files are rejected" '---
+spec-version' '<!-- OML v1: x -->
+---
+spec-version' 'this flow.md is OML v1'
+oml_bad "a flow inside a code fence is rejected" 'LOAD SKILL "pitching"' 'LOAD SKILL "pitching"
+```oml' 'not inside a ``` code block'
+oml_bad "decisions written as prose are a warning" 'Skip it.' 'if it is empty, skip it' "flow.md:16: warning: write 'if' as an OML statement"
 
 # ---------------------------------------------------------------------------
 section "Runtime: network modes, sandbox, system prompt (stub LLM)"
@@ -199,11 +215,11 @@ drive "$T/skilled.bot" "$T/ws"
 check "system prompt lists skills with their frontmatter descriptions" "$T/rec/system.txt" "skills/pitching/SKILL.md: Write one specific idea per lead"
 
 mkagent "$T/flowagent"
-cp "$T/flow_good/flow.md" "$T/flowagent/"
+cp -r "$T/flow_good/flow.md" "$T/flow_good/skills" "$T/flowagent/"
 build "$T/flowagent" "$T/flow.bot"
 stub_start --text /dev/null
 drive "$T/flow.bot" "$T/ws"
-check "flow.md present: system prompt tells the agent to follow it" "$T/rec/system.txt" "read flow.md: it is the flow of this session"
+check "flow.md present: system prompt tells the agent to follow it" "$T/rec/system.txt" "read flow.md \\(vfs_read\\): the flow of this session in OML v2"
 
 shell_call "echo no-curl-needed"
 drive "$T/on.bot" "$T/ws" PATH=/nonexistent

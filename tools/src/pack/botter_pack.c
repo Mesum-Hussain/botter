@@ -7,7 +7,7 @@
  *
  * Embeds (read-only) from <agent-dir>:
  *   agent.md, agent.json, flow.md, skills/, tools/doc/ (recursive)   plain files
- *       (flow.md is optional: the session flow in OML, linted for structure, see oml_lint)
+ *       (flow.md is optional: the session flow in OML v2, checked by oml.c; errors stop the build)
  *       (agent.json is optional: {"offline": true} makes the agent offline; default online)
  *   tools/bin/<name>                                 tool executables: either a
  *       native ELF x86-64 binary (any language that compiles to one) or a script
@@ -22,8 +22,10 @@
  * Plain C11/POSIX, no dependencies.
  */
 #define _GNU_SOURCE
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -301,169 +303,6 @@ static int cmp_item(const void *a, const void *b)
     return strcmp(((const item_t *)a)->path, ((const item_t *)b)->path);
 }
 
-/*
- * OML v1 structure check for flow.md (warnings only: conditions and actions are
- * plain English, so only the shape is checked). Rules: the file starts with the
- * <!-- OML v1 ... --> description; the OML code sits in a fenced block whose
- * info string has the word "oml" (```python oml: editors highlight it as Python); 4-space indentation, no tabs; a line ending in
- * ':' opens a block whose body is indented exactly 4 more; if/elif/else/for/while
- * lines end in ':'; elif/else follow an unfinished if at the same depth;
- * for-lines read "for <item> in <collection>:".
- */
-#define OML_MAXD 64
-static void oml_warn(int line, const char *msg)
-{
-    char m[200];
-    snprintf(m, sizeof(m), "flow.md line %d: %s", line, msg);
-    warn("%s", m);
-}
-
-static void oml_lint_code(const char *s, size_t n, int line);
-
-static void oml_lint(const char *s, size_t n)
-{
-    size_t i = 0;
-    while (i < n && (s[i] == ' ' || s[i] == '\n' || s[i] == '\r' || s[i] == '\t')) {
-        i++;
-    }
-    if (n - i < 11 || strncmp(s + i, "<!-- OML v1", 11) != 0) {
-        warn("flow.md does not start with the %s description comment", "<!-- OML v1 ... -->");
-    }
-    /* find the ```oml fence; lint only its body */
-    int line = 0;
-    for (size_t p = 0; p < n;) {
-        size_t e = p;
-        while (e < n && s[e] != '\n') {
-            e++;
-        }
-        line++;
-        size_t q = p;
-        while (q < e && s[q] == ' ') {
-            q++;
-        }
-        int oml_fence = 0; /* ``` + an info string containing the word "oml" (```oml, ```python oml) */
-        if (e - q >= 3 && strncmp(s + q, "```", 3) == 0) {
-            for (size_t w = q + 3; w + 3 <= e; w++) {
-                if ((w == q + 3 || s[w - 1] == ' ') && strncasecmp(s + w, "oml", 3) == 0 &&
-                    (w + 3 == e || s[w + 3] == ' ' || s[w + 3] == '\r')) {
-                    oml_fence = 1;
-                    break;
-                }
-            }
-        }
-        if (oml_fence) {
-            size_t b = e < n ? e + 1 : n, c = b;
-            while (c < n) {
-                size_t ce = c;
-                while (ce < n && s[ce] != '\n') {
-                    ce++;
-                }
-                size_t cq = c;
-                while (cq < ce && s[cq] == ' ') {
-                    cq++;
-                }
-                if (ce - cq >= 3 && strncmp(s + cq, "```", 3) == 0) {
-                    break;
-                }
-                c = ce < n ? ce + 1 : n;
-            }
-            if (c >= n) {
-                warn("flow.md: the %s block is not closed with ```", "```oml");
-            }
-            oml_lint_code(s + b, c - b, line);
-            return;
-        }
-        p = e + 1;
-    }
-    warn("flow.md: put the OML code inside a %s fenced block, or markdown will mangle its indentation", "```oml");
-    oml_lint_code(s, n, 0);
-}
-
-/* `line` = file line number just before s (for messages). */
-static void oml_lint_code(const char *s, size_t n, int line)
-{
-    int open_if[OML_MAXD] = {0};
-    int in_comment = 0, want_body = -1, prev_indent = 0, opener_line = 0;
-    for (size_t p = 0; p < n;) {
-        size_t e = p;
-        while (e < n && s[e] != '\n') {
-            e++;
-        }
-        line++;
-        char buf[512];
-        size_t len = e - p < sizeof(buf) - 1 ? e - p : sizeof(buf) - 1;
-        memcpy(buf, s + p, len);
-        buf[len] = '\0';
-        p = e + 1;
-        while (len && (buf[len - 1] == '\r' || buf[len - 1] == ' ')) {
-            buf[--len] = '\0';
-        }
-        char *t = buf;
-        if (in_comment || strstr(t, "<!--")) {
-            in_comment = strstr(t, "-->") == NULL;
-            continue;
-        }
-        int ind = 0, tab = 0;
-        while (t[ind] == ' ' || t[ind] == '\t') {
-            tab |= t[ind] == '\t';
-            ind++;
-        }
-        t += ind;
-        if (!*t || (ind == 0 && *t == '#')) {
-            continue; /* blank line or markdown heading */
-        }
-        if (tab) {
-            oml_warn(line, "use spaces, not tabs, for indentation");
-            continue;
-        }
-        if (ind % 4) {
-            oml_warn(line, "indentation must be a multiple of 4 spaces");
-        }
-        int d = ind / 4 < OML_MAXD ? ind / 4 : OML_MAXD - 1;
-        if (want_body >= 0) {
-            if (ind != want_body) {
-                oml_warn(opener_line, "a line ending in ':' must be followed by a body indented 4 more spaces");
-            }
-            want_body = -1;
-        } else if (ind > prev_indent) {
-            oml_warn(line, "unexpected indent (only a line ending in ':' opens a block)");
-        }
-        for (int k = d + 1; k < OML_MAXD; k++) {
-            open_if[k] = 0;
-        }
-        char w[16] = {0};
-        size_t wl = strcspn(t, " :");
-        if (wl < sizeof(w)) {
-            memcpy(w, t, wl);
-        }
-        int colon = len && buf[len - 1] == ':';
-        if (!strcmp(w, "if") || !strcmp(w, "elif") || !strcmp(w, "else") || !strcmp(w, "for") || !strcmp(w, "while")) {
-            if (!colon) {
-                oml_warn(line, "if/elif/else/for/while lines must end with ':'");
-            }
-        }
-        if (!strcmp(w, "elif") || !strcmp(w, "else")) {
-            if (!open_if[d]) {
-                oml_warn(line, "elif/else without an unfinished 'if' at the same indentation");
-            }
-            open_if[d] = !strcmp(w, "elif");
-        } else {
-            open_if[d] = !strcmp(w, "if");
-        }
-        if (!strcmp(w, "for") && !strstr(t, " in ")) {
-            oml_warn(line, "a for-line reads: for <item> in <collection>:");
-        }
-        if (colon) {
-            want_body = ind + 4;
-            opener_line = line;
-        }
-        prev_indent = ind;
-    }
-    if (want_body >= 0) {
-        oml_warn(opener_line, "a line ending in ':' must be followed by a body indented 4 more spaces");
-    }
-}
-
 static int has_item(const char *path)
 {
     for (size_t i = 0; i < n_items; i++) {
@@ -472,6 +311,30 @@ static int has_item(const char *path)
         }
     }
     return 0;
+}
+
+#include "oml.c"
+
+/* Names OML's EXECUTE tool may use: botcore's built-ins and this agent's tools/bin. */
+static int oml_has_tool(const char *name)
+{
+    static const char *const builtin[] = {"fs_list",  "fs_read",   "fs_write",  "shell_exec", "vfs_list", "vfs_read",
+                                          "get_time", "cron_set",  "cron_list", "cron_delete", NULL};
+    for (int i = 0; builtin[i]; i++) {
+        if (strcmp(builtin[i], name) == 0) {
+            return 1;
+        }
+    }
+    char p[300];
+    snprintf(p, sizeof(p), "tools/bin/%s", name);
+    return has_item(p);
+}
+
+static int oml_has_skill(const char *name)
+{
+    char p[300];
+    snprintf(p, sizeof(p), "skills/%s/SKILL.md", name);
+    return has_item(p);
 }
 
 /* Load every item; classify tools/bin entries as ELF or script. */
@@ -592,8 +455,12 @@ static int cmd_build(const char *dir, const char *botcore, const char *out)
     free(mf);
     for (size_t i = 0; i < n_items; i++) {
         if (strcmp(items[i].path, "flow.md") == 0 && items[i].data) {
-            oml_lint(items[i].data, items[i].len);
+            oml_check(items[i].data, items[i].len, oml_has_tool, oml_has_skill);
         }
+    }
+    if (errors) { /* a flow.md that does not compile is not built */
+        fprintf(stderr, "botter_pack: flow.md has %d error(s); nothing was built\n", errors);
+        return 1;
     }
 
     if (!out) { /* dry run: everything validated, write nothing */

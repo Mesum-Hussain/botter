@@ -11,7 +11,7 @@ The project root is the folder the user started botter in. The built file is nam
 <agent>/
   agent.md             persona and behaviour = the agent's system prompt
   agent.json           OPTIONAL settings. Only use: {"offline": true} for an offline agent
-  flow.md              OPTIONAL (recommended for multi-step agents): the session flow in OML (see write-flow)
+  flow.md              OPTIONAL (recommended for multi-step agents): the session flow in OML v2: frontmatter + UPPERCASE statements, checked by the build (see write-flow)
   skills/<name>/SKILL.md   task playbooks: how and when to use tools
   tools/                OPTIONAL
     bin/<name>          the runnable tool: native x86-64 ELF, or a script starting with #!

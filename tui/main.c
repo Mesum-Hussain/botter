@@ -2136,30 +2136,6 @@ static int spawn_agent(int fd)
     return 0;
 }
 
-/* After leaving the alternate screen: the conversation goes to normal scrollback. */
-static void dump_transcript(void)
-{
-    int cw = g_W - 2 > 20 ? g_W - 2 : 20;
-    layout_all(cw);
-    tsb_t o = {0};
-    for (int i = 0; i < g_nb; i++) {
-        for (int y = 0; y < g_b[i].L.n; y++) {
-            const tline_t *l = &g_b[i].L.l[y];
-            tsb_str(&o, " ");
-            for (int k = 0; k < l->n; k++) {
-                tsty_t s = l->r[k].s;
-                sgr(&o, s, l->fill == TC_NONE ? TC_NONE : l->fill);
-                tsb_str(&o, l->r[k].t);
-            }
-            tsb_str(&o, "\033[0m\n");
-        }
-    }
-    if (o.len) {
-        (void)!write(g_tty, o.p, o.len);
-    }
-    tsb_free(&o);
-}
-
 #ifndef BOTTER_VERSION
 #define BOTTER_VERSION "dev"
 #endif
@@ -2306,8 +2282,7 @@ int main(int argc, char **argv)
         kill(g_child, SIGTERM);
     }
     waitpid(g_child, &status, 0);
-    tty_restore();
-    dump_transcript();
+    tty_restore(); /* back to the terminal as it was: the conversation is not left on screen */
     if (E.p) {
         explicit_bzero(E.p, E.cap);
     }
