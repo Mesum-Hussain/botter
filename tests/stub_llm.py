@@ -20,6 +20,7 @@ ap.add_argument("--args", default="{}")
 ap.add_argument("--text")
 ap.add_argument("--slow", action="store_true")
 ap.add_argument("--nostream", action="store_true", help='answer 400 to "stream": true')
+ap.add_argument("--busy", type=int, default=0, help="answer 503 (high demand) to the first N requests")
 ap.add_argument("--think", action="store_true", help="start the text answer with a <think> block")
 ap.add_argument("--owl", choices=["yes", "no"], help="answer Owl interpreter requests (decisions = this word)")
 a = ap.parse_args()
@@ -50,6 +51,11 @@ class H(BaseHTTPRequestHandler):
         req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         if a.slow:
             time.sleep(60)
+            return
+        if a.busy > 0:
+            a.busy -= 1
+            save("busy.txt", "503 sent")
+            self.send({"error": {"code": 503, "message": "This model is currently experiencing high demand."}}, 503)
             return
         msgs = req["messages"]
         save("auth.txt", self.headers.get("Authorization", ""))

@@ -15,11 +15,13 @@ PASS=0 FAIL=0 SKIP=0
 STUB=
 # Never touch the user's real key cache; the keyring tests use their own namespace.
 export BOTCORE_NO_KEYRING=1
+# own tmux server: a running one would hand its sessions its own environment (e.g. a real saved key)
+tmux() { command tmux -L botter-test-$$ "$@"; }
 KRNS=botter-test-$$
 
 cleanup() {
     [ -n "$STUB" ] && kill "$STUB" 2>/dev/null
-    tmux kill-session -t botter-test 2>/dev/null
+    tmux kill-server 2>/dev/null
     rm -f "$HOME/.botter_test_probe"
     rm -rf "$T"
 }
@@ -242,6 +244,10 @@ drive "$T/on.bot" "$T/ws"
 check "streaming: an endpoint that refuses streams still works (plain fallback)" "$T/out" "Hello there, streamed reply\\."
 check "streaming: the fallback request is plain" "$T/rec/stream.txt" "^plain"
 check_not "streaming fallback: reasoning is not printed" "$T/out" "pondering|<think>"
+stub_start --think --busy 2
+drive "$T/on.bot" "$T/ws"
+check "busy endpoint: a 503 (high demand) is retried and the answer arrives" "$T/out" "Hello there, streamed reply\\."
+check_not "busy endpoint: no error is shown when a retry succeeds" "$T/out" "HTTP 503"
 
 # Session key cache (kernel keyring, own namespace): 2nd run reconnects without asking
 if [ -r /proc/keys ]; then
@@ -429,7 +435,7 @@ if command -v tmux >/dev/null 2>&1; then
     tmux send-keys -t botter-test C-c
     sleep 1
     tmux capture-pane -t botter-test -p >"$T/tmux.txt"
-    tmux kill-session -t botter-test 2>/dev/null
+    tmux kill-server 2>/dev/null
     check "Ctrl-C cancels an in-flight LLM request within a second" "$T/tmux.txt" "\\(interrupted\\)"
 
     # Botter's TUI: its flow asks first; the first message answers it, later ones are chat tagged [N]
@@ -446,7 +452,7 @@ if command -v tmux >/dev/null 2>&1; then
     tmux send-keys -t botter-test "second message" Enter
     sleep 1.2
     tmux capture-pane -t botter-test -p >"$T/tui.txt"
-    tmux kill-session -t botter-test 2>/dev/null
+    tmux kill-server 2>/dev/null
     check "TUI: messages reach the model tagged with their number" "$T/rec/user.txt" "^\\[2\\] second message"
     check "TUI: the model is told what the numbers mean" "$T/rec/system.txt" "numbers each user message and your reply"
     check_not "TUI: header is gone after the first message" "$T/tui.txt" "the agent that builds agents"
@@ -467,7 +473,7 @@ if command -v tmux >/dev/null 2>&1; then
     tmux send-keys -t botter-test "run it" Enter
     sleep 1.5
     tmux capture-pane -t botter-test -p >"$T/tui.txt"
-    tmux kill-session -t botter-test 2>/dev/null
+    tmux kill-server 2>/dev/null
     n=$(grep -c "^ *done *$" "$T/tui.txt")
     if [ "$n" -eq 1 ]; then pass "TUI: a streamed reply is shown once"; else fail "TUI: a streamed reply is shown once" "seen $n times"; fi
     check_not "TUI: tool names are hidden unless ctrl+o" "$T/tui.txt" "shell_exec"

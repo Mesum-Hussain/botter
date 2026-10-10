@@ -682,7 +682,7 @@ static int llm_step(rt_t *r, const char *msg, char **reply)
 {
     char *out = NULL;
     int rc = r->io->turn(r->io->ud, msg, &out);
-    if (rc == 1) {
+    if (rc != 0) { /* interrupted, or the model could not be reached even after retries: stop the flow */
         free(out);
         return Q_ABORT;
     }

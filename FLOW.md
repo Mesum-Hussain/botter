@@ -37,15 +37,14 @@ STEP 1: UNDERSTAND
    END IF
 
 STEP 2: PLAN
-1. INVOKE SKILL "create-agent" USING context { "request": `request`, "details": `details` }
-2. INVOKE SKILL "project-layout" USING context { "request": `request`, "details": `details` }
-3. SAVE skill_output INTO VARIABLE `plan`
-4. ASK USER "Here is my plan. Shall I build it? Say yes, or tell me what to change.\n\n" + `plan`
-5. WHILE `answer` is not an approval of the plan AT MOST 3 TIMES DO
+1. INVOKE SKILL "create-agent" USING context { "request": `request`, "details": `details`, "now": "Only plan in this step: write no files and run no builds. Reply with the plan itself: the agent's name, its role, its skills, its tools (name, purpose, input JSON, what it calls), its FLOW.md steps, its state files and what must be installed or running." }
+2. SAVE skill_output INTO VARIABLE `plan`
+3. ASK USER "Here is my plan. Shall I build it? Say yes, or tell me what to change.\n\n" + `plan`
+4. WHILE `answer` is not an approval of the plan AT MOST 3 TIMES DO
        SET `plan` TO the plan in `plan`, revised with the changes the user asked for in `answer`
        ASK USER "Here is the revised plan. Shall I build it?\n\n" + `plan`
    END WHILE
-6. IF `answer` is not an approval of the plan THEN
+5. IF `answer` is not an approval of the plan THEN
        RETURN "Stopped: the plan was not approved. Tell me what you want and we can start again."
    END IF
 

@@ -5,6 +5,7 @@
 
 #include <stdio.h>
 #include <sys/mman.h>
+#include <time.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -744,8 +745,30 @@ int chat_ask(chat_t *c, const char *system, const char *question, int with_histo
     return CHAT_OK;
 }
 
+/* Overloaded or rate-limited endpoints (Gemini 503 "high demand", 429) usually
+ * recover within seconds: wait 2, 4, 8, 16 s (Ctrl-C ends the wait) and retry. */
+#define CHAT_BUSY_RETRIES 4
+
+static int busy_status(int status)
+{
+    return status == 429 || status == 500 || status == 502 || status == 503 || status == 504;
+}
+
+static int busy_wait(int attempt)
+{
+    for (int ms = 0; ms < (2000 << attempt); ms += 200) {
+        if (term_interrupted()) {
+            return -1;
+        }
+        struct timespec ts = {0, 200 * 1000000L};
+        nanosleep(&ts, NULL);
+    }
+    return 0;
+}
+
 int chat_send(chat_t *c, const char *user, char **reply, char **err)
 {
+    int busy = 0;
     http_resp_t r;
     int ret = CHAT_ERR_OTHER;
     int tools_ran = 0;
@@ -813,6 +836,16 @@ int chat_send(chat_t *c, const char *user, char **reply, char **err)
             http_resp_free(&r);
             stream_free(&st);
             goto fail;
+        }
+        if (busy_status(r.status) && busy < CHAT_BUSY_RETRIES) {
+            http_resp_free(&r);
+            stream_free(&st);
+            if (busy_wait(busy++) < 0) {
+                ret = CHAT_ERR_ABORT;
+                goto fail;
+            }
+            round--;
+            continue;
         }
         if (r.status < 200 || r.status >= 300) {
             *err = error_text(r.status, r.body);
