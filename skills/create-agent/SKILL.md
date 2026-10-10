@@ -27,7 +27,7 @@ Follow these steps in order. Keep the conversation short.
 
 7. Build: read skills/build-agent/SKILL.md. Run agent_build with dry_run=true, fix all errors, then agent_build, then agent_inspect.
 
-8. Tell the user: the file name, its size, how to run it (./<name>.bot), what it asks at startup (provider, API key, model, and, for an offline agent with a "network" tool, the internet permission question), what tools it contains, and what must be installed or running on the machine (interpreters, services). Mention any warnings from the build in plain words.
+8. Tell the user: the file name, its size, how to run it (./<name>.bot), what it asks at startup (provider, API key, model; only an OFFLINE agent with a "network" tool also asks to allow internet, an online agent never does), what tools it contains, and what must be installed or running on the machine (interpreters, services). Mention any warnings from the build in plain words.
 
 ## Quality bar
 - agent.md describes ONE clear role. A paragraph or two plus a few firm rules is better than a long essay.

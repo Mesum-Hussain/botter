@@ -803,6 +803,11 @@ static void check_script(const item_t *it)
     if (py ? strstr(low, "sys.argv[1") != NULL : strstr(it->data, "$1") != NULL) {
         diagf(0, "%s reads command-line arguments; botcore passes none (arguments arrive as JSON on stdin)", it->path);
     }
+    if (strstr(it->data, "artifacts/")) {
+        diagf(1, "%s uses files under artifacts/, which are not part of the .bot (the agent must run in any "
+                 "folder): copy the code it needs into the tool itself, keeping the licence notice",
+              it->path);
+    }
     static const char *const fake[] = {"mock", "placeholder", "dummy", "lorem ipsum", "hard-coded", "hardcoded",
                                        "simulated", "fake ", NULL};
     for (int i = 0; fake[i]; i++) {

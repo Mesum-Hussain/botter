@@ -115,6 +115,9 @@ static void show_add(char **acc, size_t *len, const cJSON *v, int depth)
     {
         if (*len) {
             show_cat(acc, len, "\n");
+            for (int d = 0; d < depth; d++) {
+                show_cat(acc, len, "  ");
+            }
         }
         if (cJSON_IsObject(v)) {
             show_cat(acc, len, e->string);

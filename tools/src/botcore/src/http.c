@@ -303,6 +303,12 @@ static int tcp_connect(conn_t *c, const char *host, const char *port)
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     int gr = getaddrinfo(host, port, &hints, &res);
+    for (int i = 0; gr == EAI_AGAIN && i < 3 && now_s() + 1 < c->deadline; i++) {
+        /* a resolver that is busy or just woke up (first query after a network change) */
+        struct timespec ts = {0, 500 * 1000000L};
+        nanosleep(&ts, NULL);
+        gr = getaddrinfo(host, port, &hints, &res);
+    }
     if (gr != 0) {
         return fail(c, "could not resolve host %s: %s", host, gai_strerror(gr));
     }

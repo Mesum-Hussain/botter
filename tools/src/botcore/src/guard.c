@@ -233,7 +233,11 @@ static void tokenize(const char *c, toks_t *k)
     } while (0)
 
     for (const char *p = c; *p && !k->bad; p++) {
-        if (*p == '\'') {
+        if (*p == '#' && !inword) { /* a comment, as the shell reads it: up to the newline */
+            while (p[1] && p[1] != '\n') {
+                p++;
+            }
+        } else if (*p == '\'') {
             const char *e = strchr(p + 1, '\'');
             if (!e) {
                 k->bad = 1;

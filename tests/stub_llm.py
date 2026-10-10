@@ -67,6 +67,8 @@ class H(BaseHTTPRequestHandler):
 
         stream = bool(req.get("stream"))
         save("stream.txt", "stream" if stream else "plain")
+        if req.get("tool_choice"):
+            save("tool_choice.txt", "%s with %d tools" % (req["tool_choice"], len(req.get("tools") or [])))
         if stream and a.nostream:
             self.send({"error": {"message": "stream not supported"}}, 400)
             return

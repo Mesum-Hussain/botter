@@ -730,6 +730,12 @@ int chat_ask(chat_t *c, const char *system, const char *question, int with_histo
         add_msg(msgs, "system", system);
     }
     add_msg(msgs, "user", question);
+    if (with_history && c->tools && cJSON_GetArraySize(c->tools) > 0) {
+        /* a history full of tool calls but no tools on offer: Gemini answers with a
+         * call anyway (no content). Offer them and forbid their use. */
+        cJSON_AddItemReferenceToObject(root, "tools", c->tools);
+        cJSON_AddStringToObject(root, "tool_choice", "none");
+    }
     char *body = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (!url || !body) {
@@ -768,13 +774,15 @@ int chat_ask(chat_t *c, const char *system, const char *question, int with_histo
         cJSON *msg = cJSON_GetObjectItemCaseSensitive(
             cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(j, "choices"), 0), "message");
         text = extract_content(cJSON_GetObjectItemCaseSensitive(msg, "content"));
+        int called = cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(msg, "tool_calls")) > 0;
         cJSON_Delete(j);
         if (text && !text[strspn(text, " \t\r\n")] && empty < 2) {
             free(text);
             text = NULL;
         }
         if (!text && empty++ >= 2) {
-            *err = strdup("unexpected response format (no message content)");
+            *err = strdup(called ? "the model answered with a tool call instead of text"
+                                 : "unexpected response format (no message content)");
             ret = CHAT_ERR_OTHER;
             break;
         }

@@ -181,6 +181,10 @@ check "contracts: a skill without frontmatter is an error" "$T/build.log" 'error
 check "contracts: a tool that reads argv is a warning" "$T/build.log" 'tools/bin/argv reads command-line arguments'
 check "contracts: a tool that does not read stdin is a warning" "$T/build.log" 'tools/bin/argv does not seem to read stdin'
 check "contracts: mock output in a tool is a warning" "$T/build.log" 'tools/bin/argv mentions "mock"'
+printf '#!/bin/sh\ncat >/dev/null\npython3 artifacts/kit/scrape.py\n' >"$T/ctr/tools/bin/uses_art"
+echo '{"description": "d", "parameters": {"type": "object", "properties": {}}}' >"$T/ctr/tools/doc/uses_art.json"
+"$PACK" check "$T/ctr" "$CORE" >"$T/build.log" 2>&1
+check "contracts: a tool that runs code from artifacts/ is an error" "$T/build.log" 'error: tools/bin/uses_art uses files under artifacts/'
 
 # ---------------------------------------------------------------------------
 section "Runtime: network modes, sandbox, system prompt (stub LLM)"
@@ -192,6 +196,10 @@ mkdir -p "$T/ws"
 shell_call "echo hello-from-tool"
 drive "$T/on.bot" "$T/ws" PATH=/usr/bin:/bin
 check "tool loop: shell_exec runs and its output reaches the LLM" "$T/rec/tool.txt" "hello-from-tool"
+shell_call "# it's only a comment
+echo comment-ok"
+drive "$T/on.bot" "$T/ws"
+check "classifier: an apostrophe in a # comment does not make a command unsafe" "$T/rec/tool.txt" "comment-ok"
 check "online agent: system prompt says internet access" "$T/rec/system.txt" "You have internet access"
 check_not "no FLOW.md: no flow instruction in the system prompt" "$T/rec/system.txt" "driven by its FLOW.md"
 
@@ -322,6 +330,7 @@ stub_start --owl yes
 sq_drive
 check "Owl: ASK USER shows the question" "$T/out" "What is your name\\?"
 check "Owl: RETURN joins the answer, a prose decision and .length" "$T/out" "Hi Alice, mood happy, 3 items"
+check "Owl: decisions offer the tools but forbid calling them (Gemini)" "$T/rec/tool_choice.txt" "^none with [1-9]"
 check "Owl: STEP headings are shown" "$T/out" "Step 2 · WORK"
 check "Owl: EXECUTE runs the tool itself" "$T/out" "Running a command"
 check "Owl: RETRY repeats a failing step" "$T/out" "Retrying \\(2 of 2\\)"
