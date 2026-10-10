@@ -764,9 +764,23 @@ static void sq_stmt(sq_ps *s, char *t)
         s->returns++;
         return;
     }
-    if (!sq_unknown(s, w)) {
-        sq_instr(s, t); /* a shouted plain-English line ("PDF files go to out/") */
+    if (sq_unknown(s, w)) {
+        return;
     }
+    /* Two capital words that are no keyword ("SEARCH LEADS", "SEND EMAILS"): pseudo-code
+     * that looks like a statement but would only reach the model as vague prose. */
+    size_t k = 0;
+    while (isupper((unsigned char)r[k]) || r[k] == '-') {
+        k++;
+    }
+    if (k > 1 && !isalnum((unsigned char)r[k])) {
+        sq_diag(p, s->line, 1,
+                "\"%s %.*s\" is not an Owl statement: use EXECUTE, INVOKE SKILL, ASK USER, SET, IF, FOR EACH, "
+                "WHILE, RETRY or RETURN, or write the step as a plain-English sentence (\"Check Gmail for replies.\")",
+                w, (int)k, r);
+        return;
+    }
+    sq_instr(s, t); /* a shouted plain-English line ("PDF files go to out/") */
 }
 
 /* Frontmatter: spec-version "owl-1" required, title recommended. Offset after it, or 0. */

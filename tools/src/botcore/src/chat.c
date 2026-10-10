@@ -689,6 +689,28 @@ static void strip_thoughts(char *text)
     }
 }
 
+/* Overloaded or rate-limited endpoints (Gemini 503 "high demand", 429) usually
+ * recover within a minute: wait 2, 4, 8, 16, 32 s (Ctrl-C ends the wait) and
+ * retry, which also outlasts a per-minute quota. */
+#define CHAT_BUSY_RETRIES 5
+
+static int busy_status(int status)
+{
+    return status == 429 || status == 500 || status == 502 || status == 503 || status == 504;
+}
+
+static int busy_wait(int attempt)
+{
+    for (int ms = 0; ms < (2000 << attempt); ms += 200) {
+        if (term_interrupted()) {
+            return -1;
+        }
+        struct timespec ts = {0, 200 * 1000000L};
+        nanosleep(&ts, NULL);
+    }
+    return 0;
+}
+
 int chat_ask(chat_t *c, const char *system, const char *question, int with_history, char **reply, char **err)
 {
     http_resp_t r;
@@ -716,54 +738,55 @@ int chat_ask(chat_t *c, const char *system, const char *question, int with_histo
         *err = strdup("out of memory");
         return CHAT_ERR_OTHER;
     }
-    int rc = http_request(url, c->key, body, CHAT_TIMEOUT_S, &r);
+    char *text = NULL;
+    int ret = CHAT_OK;
+    /* busy endpoints are retried like chat_send; an empty answer (Gemini sometimes
+     * sends a message without content) is asked again twice */
+    for (int busy = 0, empty = 0; !text;) {
+        int rc = http_request(url, c->key, body, CHAT_TIMEOUT_S, &r);
+        if (rc != HTTP_OK) {
+            ret = transport_error(rc, &r, err);
+            http_resp_free(&r);
+            break;
+        }
+        if (busy_status(r.status) && busy < CHAT_BUSY_RETRIES) {
+            http_resp_free(&r);
+            if (busy_wait(busy++) < 0) {
+                ret = CHAT_ERR_ABORT;
+                break;
+            }
+            continue;
+        }
+        if (r.status < 200 || r.status >= 300) {
+            *err = error_text(r.status, r.body);
+            ret = (r.status == 401 || r.status == 403) ? CHAT_ERR_AUTH : CHAT_ERR_OTHER;
+            http_resp_free(&r);
+            break;
+        }
+        cJSON *j = cJSON_Parse(r.body);
+        http_resp_free(&r);
+        cJSON *msg = cJSON_GetObjectItemCaseSensitive(
+            cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(j, "choices"), 0), "message");
+        text = extract_content(cJSON_GetObjectItemCaseSensitive(msg, "content"));
+        cJSON_Delete(j);
+        if (text && !text[strspn(text, " \t\r\n")] && empty < 2) {
+            free(text);
+            text = NULL;
+        }
+        if (!text && empty++ >= 2) {
+            *err = strdup("unexpected response format (no message content)");
+            ret = CHAT_ERR_OTHER;
+            break;
+        }
+    }
     free(body);
     free(url);
-    if (rc != HTTP_OK) {
-        int ret = transport_error(rc, &r, err);
-        http_resp_free(&r);
-        return ret;
-    }
-    if (r.status < 200 || r.status >= 300) {
-        *err = error_text(r.status, r.body);
-        int ret = (r.status == 401 || r.status == 403) ? CHAT_ERR_AUTH : CHAT_ERR_OTHER;
-        http_resp_free(&r);
-        return ret;
-    }
-    cJSON *j = cJSON_Parse(r.body);
-    http_resp_free(&r);
-    cJSON *msg = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(j, "choices"), 0),
-                                                  "message");
-    char *text = extract_content(cJSON_GetObjectItemCaseSensitive(msg, "content"));
-    cJSON_Delete(j);
     if (!text) {
-        *err = strdup("unexpected response format (no message content)");
-        return CHAT_ERR_OTHER;
+        return ret;
     }
     strip_thoughts(text);
     *reply = text;
     return CHAT_OK;
-}
-
-/* Overloaded or rate-limited endpoints (Gemini 503 "high demand", 429) usually
- * recover within seconds: wait 2, 4, 8, 16 s (Ctrl-C ends the wait) and retry. */
-#define CHAT_BUSY_RETRIES 4
-
-static int busy_status(int status)
-{
-    return status == 429 || status == 500 || status == 502 || status == 503 || status == 504;
-}
-
-static int busy_wait(int attempt)
-{
-    for (int ms = 0; ms < (2000 << attempt); ms += 200) {
-        if (term_interrupted()) {
-            return -1;
-        }
-        struct timespec ts = {0, 200 * 1000000L};
-        nanosleep(&ts, NULL);
-    }
-    return 0;
 }
 
 int chat_send(chat_t *c, const char *user, char **reply, char **err)

@@ -681,6 +681,159 @@ static void load_and_classify(void)
     }
 }
 
+/* ---- contracts the build can see: descriptors, skill frontmatter, tool scripts ---- */
+
+static void diagf(int error, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+static void diagf(int error, const char *fmt, ...)
+{
+    char    m[700];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(m, sizeof(m), fmt, ap);
+    va_end(ap);
+    if (error) {
+        err("%s%s", m, NULL);
+    } else {
+        warn("%s", m);
+    }
+}
+
+/* tools/doc/<name>.json: the model only learns a tool's inputs from "parameters". */
+static void check_descriptor(const item_t *it)
+{
+    static const char *const known[] = {"description", "parameters", "timeout_s", "network", "readonly", "status", NULL};
+    cJSON *j = cJSON_ParseWithLength(it->data, it->len);
+    if (!cJSON_IsObject(j)) {
+        diagf(1, "%s is not a JSON object", it->path);
+        cJSON_Delete(j);
+        return;
+    }
+    const cJSON *d = cJSON_GetObjectItemCaseSensitive(j, "description");
+    const cJSON *par = cJSON_GetObjectItemCaseSensitive(j, "parameters");
+    if (!cJSON_IsString(d) || !d->valuestring[0]) {
+        diagf(1, "%s: no \"description\" (one sentence: what the tool does)", it->path);
+    }
+    if (!par) {
+        diagf(1, "%s: no \"parameters\": the model would call the tool without arguments. Add a JSON Schema, e.g. "
+                 "{\"type\": \"object\", \"properties\": {\"query\": {\"type\": \"string\", \"description\": \"...\"}}, "
+                 "\"required\": [\"query\"]} ({\"type\": \"object\", \"properties\": {}} for a tool without input)",
+              it->path);
+    } else {
+        const cJSON *ty = cJSON_GetObjectItemCaseSensitive(par, "type");
+        const cJSON *pr = cJSON_GetObjectItemCaseSensitive(par, "properties");
+        const cJSON *rq = cJSON_GetObjectItemCaseSensitive(par, "required"), *e;
+        if (!cJSON_IsObject(par) || !cJSON_IsString(ty) || strcmp(ty->valuestring, "object") != 0 || !cJSON_IsObject(pr)) {
+            diagf(1, "%s: \"parameters\" must be {\"type\": \"object\", \"properties\": {...}}", it->path);
+        } else {
+            cJSON_ArrayForEach(e, pr)
+            {
+                const cJSON *pd = cJSON_GetObjectItemCaseSensitive(e, "description");
+                if (!cJSON_IsObject(e) || !cJSON_GetObjectItemCaseSensitive(e, "type")) {
+                    diagf(1, "%s: parameter \"%s\" needs a \"type\"", it->path, e->string);
+                } else if (!cJSON_IsString(pd) || !pd->valuestring[0]) {
+                    diagf(0, "%s: parameter \"%s\" has no \"description\" (the model guesses what to pass)", it->path,
+                          e->string);
+                }
+            }
+            cJSON_ArrayForEach(e, rq)
+            {
+                if (!cJSON_IsString(e) || !cJSON_GetObjectItemCaseSensitive(pr, e->valuestring)) {
+                    diagf(1, "%s: \"required\" names \"%s\", which is not in \"properties\"", it->path,
+                          cJSON_IsString(e) ? e->valuestring : "?");
+                }
+            }
+        }
+    }
+    const cJSON *k;
+    cJSON_ArrayForEach(k, j)
+    {
+        int ok = 0;
+        for (int i = 0; known[i]; i++) {
+            ok |= strcmp(k->string, known[i]) == 0;
+        }
+        if (!ok) {
+            diagf(0, "%s: unknown key \"%.60s\" is ignored (known: description, parameters, timeout_s, network, "
+                     "readonly, status; prose docs go in tools/doc/<name>.md)",
+                  it->path, k->string);
+        }
+    }
+    cJSON_Delete(j);
+}
+
+/* skills/<name>/SKILL.md: the agent picks skills by the frontmatter description. */
+static void check_skill(const item_t *it)
+{
+    const char *d = it->data, *end = it->data + it->len;
+    const char *close = it->len > 4 && strncmp(d, "---\n", 4) == 0 ? memmem(d + 4, end - d - 4, "\n---", 4) : NULL;
+    if (!close) {
+        diagf(1, "%s has no frontmatter; start it with:\n---\nname: <folder name>\ndescription: <when to read this "
+                 "skill, one sentence>\n---",
+              it->path);
+        return;
+    }
+    size_t fl = close - d;
+    if (!memmem(d, fl, "\nname:", 6)) {
+        diagf(1, "%s: frontmatter has no \"name:\"", it->path);
+    }
+    if (!memmem(d, fl, "\ndescription:", 13)) {
+        diagf(1, "%s: frontmatter has no \"description:\" (the agent decides from it when to read the skill)", it->path);
+    }
+}
+
+/* tools/bin scripts: arguments arrive as JSON on stdin; output must be real. */
+static void check_script(const item_t *it)
+{
+    char *low = malloc(it->len + 1);
+    if (!low) {
+        return;
+    }
+    for (size_t i = 0; i < it->len; i++) {
+        low[i] = (char)tolower((unsigned char)it->data[i]);
+    }
+    low[it->len] = '\0';
+    const char *nl = memchr(low, '\n', it->len);
+    int py = memmem(low, nl ? (size_t)(nl - low) : it->len, "python", 6) != NULL; /* the #! line */
+    int reads = py ? strstr(low, "sys.stdin") || strstr(low, "input(") || strstr(low, "/dev/stdin")
+                   : strstr(low, "read ") || strstr(low, "cat") || strstr(low, "jq") || strstr(low, "/dev/stdin") ||
+                         strstr(low, "stdin") || strstr(low, "python");
+    if (!reads) {
+        diagf(0, "%s does not seem to read stdin: its arguments arrive as one JSON object on stdin (see write-tool)",
+              it->path);
+    }
+    if (py ? strstr(low, "sys.argv[1") != NULL : strstr(it->data, "$1") != NULL) {
+        diagf(0, "%s reads command-line arguments; botcore passes none (arguments arrive as JSON on stdin)", it->path);
+    }
+    static const char *const fake[] = {"mock", "placeholder", "dummy", "lorem ipsum", "hard-coded", "hardcoded",
+                                       "simulated", "fake ", NULL};
+    for (int i = 0; fake[i]; i++) {
+        if (strstr(low, fake[i])) {
+            diagf(0, "%s mentions \"%s\": tools must do the real job or fail with a clear error, never return "
+                     "mock or placeholder output",
+                  it->path, fake[i]);
+            break;
+        }
+    }
+    free(low);
+}
+
+static void check_contracts(void)
+{
+    for (size_t i = 0; i < n_items; i++) {
+        const item_t *it = &items[i];
+        size_t        l = strlen(it->path);
+        if (!it->data) {
+            continue;
+        }
+        if (strncmp(it->path, "tools/doc/", 10) == 0 && l > 15 && strcmp(it->path + l - 5, ".json") == 0) {
+            check_descriptor(it);
+        } else if (strncmp(it->path, "skills/", 7) == 0 && l > 9 && strcmp(it->path + l - 9, "/SKILL.md") == 0) {
+            check_skill(it);
+        } else if (it->kind == K_SCRIPT) {
+            check_script(it);
+        }
+    }
+}
+
 /* ---- output ---- */
 
 static int write_all(FILE *f, const void *d, size_t n)
@@ -740,6 +893,7 @@ static int cmd_build(const char *dir, const char *botcore, const char *out)
     }
     qsort(items, n_items, sizeof(*items), cmp_item);
     load_and_classify();
+    check_contracts();
     if (errors) {
         return 1;
     }

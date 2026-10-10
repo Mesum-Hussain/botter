@@ -83,6 +83,60 @@ static char *val_text(const cJSON *v)
     return s ? s : strdup("");
 }
 
+/* A value as people read it (ASK, RETURN, text joined with +): strings as they
+ * are, lists one "- item" per line, objects as "key: value" lines, and an object
+ * with a single key as just its value, so {"questions": [...]} is not shown raw. */
+static void show_cat(char **acc, size_t *len, const char *t)
+{
+    size_t k = t ? strlen(t) : 0;
+    char *g = t ? realloc(*acc, *len + k + 1) : NULL;
+    if (g) {
+        memcpy(g + *len, t, k + 1);
+        *acc = g;
+        *len += k;
+    }
+}
+
+static void show_add(char **acc, size_t *len, const cJSON *v, int depth)
+{
+    if (depth > 3 || !(cJSON_IsArray(v) || cJSON_IsObject(v))) {
+        char *t = val_text(v);
+        show_cat(acc, len, t);
+        free(t);
+        return;
+    }
+    if (cJSON_IsObject(v) && cJSON_GetArraySize(v) == 1) {
+        show_add(acc, len, v->child, depth);
+        return;
+    }
+    int list = cJSON_IsArray(v) && cJSON_GetArraySize(v) > 1;
+    const cJSON *e;
+    cJSON_ArrayForEach(e, v)
+    {
+        if (*len) {
+            show_cat(acc, len, "\n");
+        }
+        if (cJSON_IsObject(v)) {
+            show_cat(acc, len, e->string);
+            show_cat(acc, len, ": ");
+        } else if (list) {
+            show_cat(acc, len, "- ");
+        }
+        show_add(acc, len, e, depth + 1);
+    }
+}
+
+static char *show_text(const cJSON *v)
+{
+    if (!cJSON_IsArray(v) && !cJSON_IsObject(v)) {
+        return val_text(v);
+    }
+    char *acc = NULL;
+    size_t len = 0;
+    show_add(&acc, &len, v, 0);
+    return acc ? acc : strdup("");
+}
+
 static char *vars_dump(rt_t *r)
 {
     char *s = cJSON_PrintUnformatted(r->vars);
@@ -340,7 +394,7 @@ static cJSON *eval_literal(rt_t *r, const char *expr)
             c = e;
         }
         terms++;
-        char *t = val_text(v);
+        char *t = show_text(v);
         char *n = NULL;
         if (asprintf(&n, "%s%s", acc ? acc : "", t ? t : "") < 0) {
             n = NULL;
@@ -751,7 +805,7 @@ static int st_ask(rt_t *r, sq_node *x)
     if (abort) {
         return Q_ABORT;
     }
-    char *qt = val_text(q), *ans = NULL;
+    char *qt = show_text(q), *ans = NULL;
     cJSON_Delete(q);
     if (r->io->ask_user(r->io->ud, qt, &ans) != 0) {
         free(qt);
@@ -845,7 +899,7 @@ static int st_return(rt_t *r, sq_node *x)
 {
     if (sq_is_literal(x->a)) {
         cJSON *v = eval_literal(r, x->a);
-        char *t = val_text(v);
+        char *t = show_text(v);
         cJSON_Delete(v);
         r->io->say(r->io->ud, t);
         free(t);

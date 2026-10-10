@@ -92,6 +92,7 @@ sq_bad() {
     "$PACK" build "$T/flow_bad" "$CORE" "$T/flow_bad.bot" >"$T/lint.log" 2>&1
     check "Owl: $1" "$T/lint.log" "$4"
 }
+sq_bad "capital pseudo-code is not a statement" 'Skip it.' 'SEARCH LEADS (with the scraper)' 'error: "SEARCH LEADS" is not an Owl statement'
 sq_bad "keyword typo is an error with its line" 'INVOKE SKILL' 'INVOCATE SKILL' 'FLOW.md:15: error: unknown keyword INVOCATE; did you mean INVOKE'
 if [ -e "$T/flow_bad.bot" ]; then fail "Owl: a flow with errors is not built"; else pass "Owl: a flow with errors is not built"; fi
 sq_bad "unknown tool" '`fs_read`' '`fs_reed`' 'no such tool'
@@ -153,7 +154,7 @@ check "an old SQNC.md is reported" "$T/build.log" "SQNC.md is now FLOW.md"
 mkagent "$T/pick" '{"name": "pick", "version": "1.0.0", "description": "d", "skills": ["keep"], "tools": ["tkeep"], "requires": ["python3"]}'
 mkdir -p "$T/pick/skills/keep" "$T/pick/skills/drop" "$T/pick/tools/bin" "$T/pick/tools/doc"
 for k in keep drop; do printf -- '---\nname: %s\ndescription: d\n---\n' $k >"$T/pick/skills/$k/SKILL.md"; done
-for t in tkeep tdrop; do printf '#!/usr/bin/env python3\nprint(1)\n' >"$T/pick/tools/bin/$t"; chmod +x "$T/pick/tools/bin/$t"; echo '{"description": "d"}' >"$T/pick/tools/doc/$t.json"; done
+for t in tkeep tdrop; do printf '#!/usr/bin/env python3\nimport sys; print(sys.stdin.read())\n' >"$T/pick/tools/bin/$t"; chmod +x "$T/pick/tools/bin/$t"; echo '{"description": "d", "parameters": {"type": "object", "properties": {}}}' >"$T/pick/tools/doc/$t.json"; done
 build "$T/pick" "$T/pick.bot"
 "$PACK" list "$T/pick.bot" >"$T/list.log" 2>&1
 check "config.json skills: a listed skill is compiled in" "$T/list.log" "skills/keep/SKILL.md"
@@ -163,10 +164,23 @@ check_not "config.json tools: an unlisted tool and its doc are left out" "$T/lis
 check "config.json: leaving one out is a warning" "$T/build.log" 'skills "drop" is not listed in config.json "skills"'
 mkagent "$T/needpy" '{"name": "needpy", "version": "1.0.0", "description": "d"}'
 mkdir -p "$T/needpy/tools/bin" "$T/needpy/tools/doc"
-printf '#!/usr/bin/env python3\nprint(1)\n' >"$T/needpy/tools/bin/pyt"; chmod +x "$T/needpy/tools/bin/pyt"
-echo '{"description": "d"}' >"$T/needpy/tools/doc/pyt.json"
+printf '#!/usr/bin/env python3\nimport sys; print(sys.stdin.read())\n' >"$T/needpy/tools/bin/pyt"; chmod +x "$T/needpy/tools/bin/pyt"
+echo '{"description": "d", "parameters": {"type": "object", "properties": {}}}' >"$T/needpy/tools/doc/pyt.json"
 "$PACK" check "$T/needpy" "$CORE" >"$T/build.log" 2>&1
 check "config.json: a script tool's interpreter missing from requires is a warning" "$T/build.log" 'runs with python3: add "python3" to "requires"'
+# contracts the build checks: descriptors, skill frontmatter, tool scripts
+mkagent "$T/ctr" '{"name": "ctr", "version": "1.0.0", "description": "d", "requires": ["python3"]}'
+mkdir -p "$T/ctr/tools/bin" "$T/ctr/tools/doc" "$T/ctr/skills/bare"
+echo "# Bare skill" >"$T/ctr/skills/bare/SKILL.md"
+printf '#!/usr/bin/env python3\nimport sys\nprint("mock leads for " + sys.argv[1])\n' >"$T/ctr/tools/bin/argv"; chmod +x "$T/ctr/tools/bin/argv"
+echo '{"name": "argv", "description": "d", "input": "keyword"}' >"$T/ctr/tools/doc/argv.json"
+"$PACK" check "$T/ctr" "$CORE" >"$T/build.log" 2>&1
+check "contracts: a descriptor without parameters is an error" "$T/build.log" 'error: tools/doc/argv.json: no "parameters"'
+check "contracts: unknown descriptor keys are a warning" "$T/build.log" 'warning: tools/doc/argv.json: unknown key "input"'
+check "contracts: a skill without frontmatter is an error" "$T/build.log" 'error: skills/bare/SKILL.md has no frontmatter'
+check "contracts: a tool that reads argv is a warning" "$T/build.log" 'tools/bin/argv reads command-line arguments'
+check "contracts: a tool that does not read stdin is a warning" "$T/build.log" 'tools/bin/argv does not seem to read stdin'
+check "contracts: mock output in a tool is a warning" "$T/build.log" 'tools/bin/argv mentions "mock"'
 
 # ---------------------------------------------------------------------------
 section "Runtime: network modes, sandbox, system prompt (stub LLM)"

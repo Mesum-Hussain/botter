@@ -22,7 +22,8 @@ artifacts/ is never embedded. You read it, then copy or adapt what the agent nee
 - The code runs sandboxed: it cannot read or write $HOME outside the working directory (only /tmp and ~/.cache are writable). Point any config, credentials file or output path the repo uses at the working directory (e.g. keep .env there).
 - Understanding, ranking and writing (e.g. reading a lead and inventing a pitch) is the agent's own LLM's job, guided by a skill. Do not hide it in a script.
 - Only if the agent is offline (config.json "internet": false) does a step that talks to a server, even on localhost, need "network": true in that tool's descriptor (read write-tool, section Network).
-- Runs longer than 10 minutes: split into start / status / download, and let the agent poll (or use cron_set to check back).
+- A tool returns what the agent needs next (the leads, the sent message id), not an intermediate handle: a scrape tool that only returns a job id is useless unless status and download tools exist too. Jobs up to 10 minutes: one tool that starts, waits (timeout_s up to 600) and returns the result. Longer: split into start / status / download and let the agent poll (or use cron_set to check back).
+- Inputs the service needs but the user will not know (coordinates for a city, an id) are the tool's job: e.g. the scraper needs lat/lon, so the tool takes a city and geocodes it (the repo's own scrape.py shows how).
 
 ## 3. Services the code depends on (Docker containers, local servers)
 - Prefer that the user starts them (docker compose up -d). An online agent may run docker itself through shell_exec if the user agrees; an offline agent cannot.

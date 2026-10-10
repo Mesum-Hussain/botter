@@ -33,11 +33,14 @@ STEP 1: UNDERSTAND
        SET `details` TO "no further details"
    END IF
 9. IF `request` or `details` asks to wrap an existing repository or program THEN
-       INVOKE SKILL "wrap-existing-project" USING context { "request": `request`, "details": `details` }
+       INVOKE SKILL "wrap-existing-project" USING context { "request": `request`, "details": `details`, "now": "Only section 1 now: put the code in artifacts/ and study it. Write no project files and run no builds. Reply with your notes: what it does, entry points with their real arguments, inputs, outputs, what must be installed or running, network use, run time, licence, usage rules." }
+       SAVE skill_output INTO VARIABLE `repo_notes`
+   ELSE
+       SET `repo_notes` TO "no existing code"
    END IF
 
 STEP 2: PLAN
-1. INVOKE SKILL "create-agent" USING context { "request": `request`, "details": `details`, "now": "Only plan in this step: write no files and run no builds. Reply with the plan itself: the agent's name, its role, its skills, its tools (name, purpose, input JSON, what it calls), its FLOW.md steps, its state files and what must be installed or running." }
+1. INVOKE SKILL "create-agent" USING context { "request": `request`, "details": `details`, "repo_notes": `repo_notes`, "now": "Only plan in this step: write no files and run no builds. Reply with the plan itself: the agent's name, its role, its skills, its tools (name, purpose, input JSON, what it calls), its FLOW.md steps, its state files and what must be installed or running." }
 2. SAVE skill_output INTO VARIABLE `plan`
 3. ASK USER "Here is my plan. Shall I build it? Say yes, or tell me what to change.\n\n" + `plan`
 4. WHILE `answer` is not an approval of the plan AT MOST 3 TIMES DO

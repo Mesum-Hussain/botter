@@ -36,7 +36,7 @@ Only add a tool when file tools and shell commands are not enough.
   "timeout_s": 60
 }
 ```
-   "parameters" is a JSON Schema object; without it the LLM sees a tool with no arguments, so declare every argument the tool reads. "timeout_s" optional. "network": true optional (offline agents only, see Network). "readonly": true optional: only for a tool that changes nothing anywhere (no file writes, no messages sent, no API calls that change data); such a tool runs in Plan mode without asking, every other tool asks the user first there. "status" optional: what the user sees while the tool runs, in plain words, e.g. "Searching for leads" (the user never sees tool names; default "Working"). Other keys (name, path) are ignored.
+   "parameters" is a JSON Schema object; without it the LLM sees a tool with no arguments, so declare every argument the tool reads. "timeout_s" optional. "network": true optional (offline agents only, see Network). "readonly": true optional: only for a tool that changes nothing anywhere (no file writes, no messages sent, no API calls that change data); such a tool runs in Plan mode without asking, every other tool asks the user first there. "status" optional: what the user sees while the tool runs, in plain words, e.g. "Searching for leads" (the user never sees tool names; default "Working"). Other keys (name, input, output ...) are ignored and the build warns: prose belongs in tools/doc/<name>.md.
 3. tools/doc/<name>.md     optional prose: examples, caveats. The agent reads it with vfs_read.
 4. tools/src/<name>/       source of COMPILED tools only (never embedded, never deleted).
 
@@ -62,6 +62,9 @@ Put the source in tools/src/<name>/ and the binary in tools/bin/<name>. With a C
   gcc -Os -static -o tools/bin/<name> tools/src/<name>/<name>.c           (needs static glibc)
 If no compiler exists, do not pretend: write the tool as a script, or give the user the source and the compile command and let them place the binary in tools/bin.
 Test: echo '{"n": 10}' | tools/bin/<name>
+
+## Secrets and settings
+Credentials (passwords, API keys, SMTP logins) never go in project files: those are embedded in the .bot for anyone to read. The tool reads them at run time from a `.env` file in the working directory (KEY=value lines; parse it yourself, a few lines of code, no extra package) and, when a key is missing, exits non-zero with: "Missing GMAIL_USER in .env (working directory)". Do not depend on exported environment variables: the user starts the agent without them. agent.md lists the keys so the agent can tell the user what to put in .env.
 
 ## Network
 Agents are ONLINE by default: shell_exec and every tool reach the internet and localhost services. Nothing to declare.
