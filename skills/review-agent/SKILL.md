@@ -15,6 +15,8 @@ The build only checks formats. This review checks that the files do what the use
    - a tool that would crash on real data (an e-mail with several parts, an empty file, a missing data/ folder, a key missing from .env) or prints more than ~32KB (trim the fields, save the full data to a file);
    - FLOW.md that never calls a tool or skill the plan needs, or uses a user's answer for the wrong purpose;
    - placeholder or hard-coded content where real content is needed.
+   - a tool that interprets people's text (splitting, keyword matching, regex for intent): that is the model's job (SET ... TO <prose> in FLOW.md);
+   - for every tool, compare its descriptor's actions/enum with every action the plan or the skills use (send, reply, check ...): each one must exist in the code.
 
 Reply with only a JSON list, one object per gap, most important first:
 [{"file": "tools/bin/gmail", "gap": "no 'send' action: first emails cannot be sent", "fix": "add action send: to, subject, body; apply TEST_RECIPIENT"}]

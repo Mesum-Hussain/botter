@@ -17,6 +17,7 @@ Only add a tool when file tools and shell commands are not enough.
 - Files (Landlock, where the kernel supports it): it may write only inside the working directory, /tmp, /var/tmp, ~/.cache and ~/.npm; it may read and run system directories and programs on $PATH. The rest of $HOME (~/.ssh, ~/.config, ...) is invisible: "Permission denied". Keep a tool's data and config in the working directory. Default timeout 60 s (descriptor timeout_s, max 600).
 - Command-line arguments ($1, sys.argv) are always EMPTY. A tool that reads argv instead of stdin JSON is broken. A tool that calls another of the agent's tools must pass it JSON on stdin too.
 - Never ship mock, placeholder or hard-coded results. Never write a tool that calls an LLM: the agent's own model does the reasoning.
+- Never parse what a person wrote (split on " in ", keyword lists, regexes for intent or names): that is understanding, the agent's own model does it. In FLOW.md: `SET \`city\` TO the city named in \`clients\``. Tools take clean, structured arguments.
 - Read stdin fully before answering. Do not prompt the user: stdin is not a terminal.
 
 ## Files for a tool called <name>
