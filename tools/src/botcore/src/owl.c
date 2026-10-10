@@ -447,6 +447,19 @@ static void sq_instr(sq_ps *s, const char *t)
  * sent as it is: the real text must be produced first (INVOKE SKILL, SET ... TO). */
 static void sq_placeholder(sq_prog *p, int line, const char *v)
 {
+    int inq = 0, intick = 0;
+    for (const char *c = v; *c; c++) { /* "..." outside strings: fields left out ({ "to": `x`, ... }) */
+        if (*c == '\\' && inq && c[1]) {
+            c++;
+        } else if (*c == '"' && !intick) {
+            inq = !inq;
+        } else if (*c == '`' && !inq) {
+            intick = !intick;
+        } else if (!inq && !intick && !strncmp(c, "...", 3)) {
+            sq_diag(p, line, 1, "\"...\" in a tool's arguments: write out every argument the tool needs");
+            break;
+        }
+    }
     for (const char *c = v; (c = strchr(c, '"'));) {
         const char *e = c + 1;
         while (*e && *e != '"') {
