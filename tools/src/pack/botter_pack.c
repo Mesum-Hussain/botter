@@ -818,6 +818,24 @@ static void check_script(const item_t *it)
                  "folder): copy the code it needs into the tool itself, keeping the licence notice",
               it->path);
     }
+    if (strstr(low, "sleep")) { /* polls a job: the default 60 s timeout kills it mid-wait */
+        char dp[200];
+        snprintf(dp, sizeof(dp), "tools/doc/%s.json", it->path + 10);
+        const cJSON *to = NULL;
+        cJSON *d = NULL;
+        for (size_t i = 0; i < n_items; i++) {
+            if (strcmp(items[i].path, dp) == 0 && items[i].data) {
+                d = cJSON_ParseWithLength(items[i].data, items[i].len);
+                to = cJSON_GetObjectItemCaseSensitive(d, "timeout_s");
+            }
+        }
+        if (!cJSON_IsNumber(to) || to->valuedouble <= 60) {
+            diagf(0, "%s waits (sleep) but %s has no \"timeout_s\" above the default 60 s: set it to the "
+                     "longest run it needs (max 600)",
+                  it->path, dp);
+        }
+        cJSON_Delete(d);
+    }
     static const char *const fake[] = {"mock", "placeholder", "dummy", "lorem ipsum", "hard-coded", "hardcoded",
                                        "simulated", "fake ", NULL};
     for (int i = 0; fake[i]; i++) {

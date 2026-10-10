@@ -75,7 +75,7 @@ STEP 4: CHECK
 1. INVOKE SKILL "build-agent" USING context `plan`
 2. EXECUTE tool `agent_build` with payload { "dry_run": true }
 3. SAVE result INTO VARIABLE `check`
-4. WHILE `check` CONTAINS "error" AT MOST 5 TIMES DO
+4. WHILE `check` CONTAINS "error" OR `check` CONTAINS "warning" AT MOST 5 TIMES DO
        Fix every error and warning reported here: `check`
        EXECUTE tool `agent_build` with payload { "dry_run": true }
        SAVE result INTO VARIABLE `check`

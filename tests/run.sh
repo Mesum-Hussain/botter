@@ -189,6 +189,10 @@ check "contracts: a tool that runs code from artifacts/ is an error" "$T/build.l
 printf '#!/bin/sh\n# adapted from artifacts/kit/scrape.py (MIT)\ncat\n' >"$T/ctr/tools/bin/uses_art"
 "$PACK" check "$T/ctr" "$CORE" >"$T/build.log" 2>&1
 check_not "contracts: a comment crediting artifacts/ is fine" "$T/build.log" 'uses_art uses files under artifacts/'
+printf '#!/usr/bin/env python3\nimport sys, time\nsys.stdin.read()\ntime.sleep(1)\n' >"$T/ctr/tools/bin/poller"
+echo '{"description": "d", "parameters": {"type": "object", "properties": {}}}' >"$T/ctr/tools/doc/poller.json"
+"$PACK" check "$T/ctr" "$CORE" >"$T/build.log" 2>&1
+check "contracts: a tool that waits with the default timeout is a warning" "$T/build.log" 'tools/bin/poller waits \(sleep\)'
 
 # ---------------------------------------------------------------------------
 section "Runtime: network modes, sandbox, system prompt (stub LLM)"
