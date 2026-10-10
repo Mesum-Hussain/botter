@@ -1,14 +1,11 @@
 /botter
-/botter.bot
 /artifacts/
 /tools/bin/
 /tools/src/agent_tools/agent_tools
 /graphify-out/
-/pac.md
 tui/botter-tui
 tui/botter-tui-dev
 /dist/
-/tools/src/pack/botter_pack
 /tools/src/botcore/botcore
 /tools/src/botcore/botcore-static
 /tools/src/botcore/obj/
