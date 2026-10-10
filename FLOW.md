@@ -75,12 +75,12 @@ STEP 4: CHECK
 1. INVOKE SKILL "build-agent" USING context `plan`
 2. EXECUTE tool `agent_build` with payload { "dry_run": true }
 3. SAVE result INTO VARIABLE `check`
-4. WHILE `check` CONTAINS "error" OR `check` CONTAINS "warning" AT MOST 5 TIMES DO
+4. WHILE `check` CONTAINS "error:" OR `check` CONTAINS "warning:" AT MOST 5 TIMES DO
        Fix every error and warning reported here: `check`
        EXECUTE tool `agent_build` with payload { "dry_run": true }
        SAVE result INTO VARIABLE `check`
    END WHILE
-5. IF `check` CONTAINS "error" THEN
+5. IF `check` CONTAINS "error:" THEN
        RETURN "the errors that remain in `check` and what the user can do about them"
    END IF
 6. EXECUTE tool `fs_list` with payload { "path": "." }
