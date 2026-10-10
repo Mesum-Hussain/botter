@@ -391,11 +391,20 @@ static void test_one(sb_t *s, const char *dir, const char *name, int *failed, do
     int    code = pid < 0 ? -1 : WIFEXITED(st) ? WEXITSTATUS(st) : 128 + WTERMSIG(st);
     long   olen = ftell(out);
     int    ok = !timed_out && code == 0 && olen > 0;
-    if (!ok) {
+    /* "Missing GMAIL_USER in .env": the tool works, the user has not configured it yet */
+    char tail[400] = "";
+    long elen = ftell(err);
+    fseek(err, 0, SEEK_SET);
+    size_t tn = fread(tail, 1, sizeof(tail) - 1, err);
+    tail[tn] = '\0';
+    fseek(err, elen, SEEK_SET);
+    int setup = !ok && !timed_out && code != 0 && strcasestr(tail, "missing") && strstr(tail, ".env");
+    if (!ok && !setup) {
         (*failed)++;
     }
     sb_add(s, "%s: %s (input %s; %.1f s)\n", name,
            timed_out ? "FAILED: timed out (raise \"timeout_s\", or make the tool faster)"
+           : setup   ? "NEEDS SETUP: the user must fill in .env first (fine for now; tell them which keys)"
            : code != 0 ? "FAILED: exit code non-zero"
            : olen == 0 ? "FAILED: printed nothing"
                        : "ok",
@@ -446,7 +455,7 @@ static int cmd_test(const cJSON *args)
     if (!ran && !failed) {
         sb_add(&s, "%s\n", only ? "no such tool in tools/bin" : "this project has no tools in tools/bin");
     }
-    sb_add(&s, "%d tool(s) tested, %d FAILED or not tested\n", ran, failed);
+    sb_add(&s, "%d tool(s) tested, %d FAILED or not tested (NEEDS SETUP is not a failure)\n", ran, failed);
     fputs(s.p ? s.p : "", stdout);
     return 0;
 }

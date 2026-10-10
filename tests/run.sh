@@ -389,7 +389,7 @@ tool_call tool_test '{"dir": "tt"}'
 drive "$BOTTER" "$T" BOTTER_TUI=0
 check "tool_test: a working tool runs with its example (stdin JSON, no exec bit)" "$T/rec/tool.txt" "good: ok"
 check "tool_test: its real output is shown" "$T/rec/tool.txt" "stdout: echo: hi"
-check "tool_test: a failing tool shows exit code and stderr" "$T/rec/tool.txt" "exit code: 3"
+check "tool_test: a tool that only lacks .env settings needs setup, not a fix" "$T/rec/tool.txt" "bad: NEEDS SETUP"
 check "tool_test: stderr reaches the model" "$T/rec/tool.txt" "Missing KEY in .env"
 check "tool_test: a tool without example is reported" "$T/rec/tool.txt" 'noex: NOT TESTED: add .example.'
 [ -x "$T/proj/proj.bot" ] && pass "botter: the built agent is executable" || fail "botter: the built agent is executable"
