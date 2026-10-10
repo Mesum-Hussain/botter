@@ -1,0 +1,21 @@
+{
+  "description": "Run the project's tools for real, each with the \"example\" input from its tools/doc/<name>.json, the way the agent will (JSON on stdin, project folder as working directory, the tool's timeout_s). Reports per tool: ok or FAILED, exit code, stdout and stderr. Use it after writing or changing a tool, and fix every FAILED before building.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "dir": {
+        "type": "string",
+        "description": "Agent project directory, relative to the working directory. Default: the working directory itself."
+      },
+      "tool": {
+        "type": "string",
+        "description": "Test only this tool (its name in tools/bin). Default: every tool."
+      }
+    }
+  },
+  "timeout_s": 600,
+  "status": "Testing the tools",
+  "example": {
+    "tool": "scrape_leads"
+  }
+}

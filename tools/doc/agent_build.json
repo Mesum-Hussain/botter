@@ -3,11 +3,23 @@
   "parameters": {
     "type": "object",
     "properties": {
-      "dir": {"type": "string", "description": "Agent project directory, relative to the working directory. Default: the working directory itself."},
-      "output": {"type": "string", "description": "Output file path inside the working directory. Default: ./<name of the project folder>.bot"},
-      "dry_run": {"type": "boolean", "description": "Only validate the project, write nothing. Default false."}
+      "dir": {
+        "type": "string",
+        "description": "Agent project directory, relative to the working directory. Default: the working directory itself."
+      },
+      "output": {
+        "type": "string",
+        "description": "Output file path inside the working directory. Default: ./<name of the project folder>.bot"
+      },
+      "dry_run": {
+        "type": "boolean",
+        "description": "Only validate the project, write nothing. Default false."
+      }
     }
   },
   "timeout_s": 120,
-  "status": "Building the agent"
+  "status": "Building the agent",
+  "example": {
+    "dry_run": true
+  }
 }

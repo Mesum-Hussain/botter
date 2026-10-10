@@ -3,11 +3,19 @@
   "parameters": {
     "type": "object",
     "properties": {
-      "file": {"type": "string", "description": "Path of the .bot file, inside the working directory."}
+      "file": {
+        "type": "string",
+        "description": "Path of the .bot file, inside the working directory."
+      }
     },
-    "required": ["file"]
+    "required": [
+      "file"
+    ]
   },
   "timeout_s": 30,
   "readonly": true,
-  "status": "Checking the build"
+  "status": "Checking the build",
+  "example": {
+    "file": "marketer.bot"
+  }
 }

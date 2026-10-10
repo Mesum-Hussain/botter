@@ -701,7 +701,7 @@ static void diagf(int error, const char *fmt, ...)
 /* tools/doc/<name>.json: the model only learns a tool's inputs from "parameters". */
 static void check_descriptor(const item_t *it)
 {
-    static const char *const known[] = {"description", "parameters", "timeout_s", "network", "readonly", "status", NULL};
+    static const char *const known[] = {"description", "parameters", "timeout_s", "network", "readonly", "status", "example", NULL};
     cJSON *j = cJSON_ParseWithLength(it->data, it->len);
     if (!cJSON_IsObject(j)) {
         diagf(1, "%s is not a JSON object", it->path);
@@ -744,6 +744,14 @@ static void check_descriptor(const item_t *it)
             }
         }
     }
+    const cJSON *ex = cJSON_GetObjectItemCaseSensitive(j, "example");
+    if (!ex) {
+        diagf(0, "%s: no \"example\": add a realistic, harmless input object so the tool can be tested for real "
+                 "(Botter's tool_test runs it)",
+              it->path);
+    } else if (!cJSON_IsObject(ex)) {
+        diagf(1, "%s: \"example\" must be a JSON object of arguments", it->path);
+    }
     const cJSON *k;
     cJSON_ArrayForEach(k, j)
     {
@@ -753,7 +761,7 @@ static void check_descriptor(const item_t *it)
         }
         if (!ok) {
             diagf(0, "%s: unknown key \"%.60s\" is ignored (known: description, parameters, timeout_s, network, "
-                     "readonly, status; prose docs go in tools/doc/<name>.md)",
+                     "readonly, status, example; prose docs go in tools/doc/<name>.md)",
                   it->path, k->string);
         }
     }

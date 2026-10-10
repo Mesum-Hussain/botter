@@ -34,10 +34,11 @@ Only add a tool when file tools and shell commands are not enough.
     },
     "required": ["path"]
   },
-  "timeout_s": 60
+  "timeout_s": 60,
+  "example": {"path": "notes/today.txt", "limit": 20}
 }
 ```
-   "parameters" is a JSON Schema object; without it the LLM sees a tool with no arguments, so declare every argument the tool reads. "timeout_s" optional. "network": true optional (offline agents only, see Network). "readonly": true optional: only for a tool that changes nothing anywhere (no file writes, no messages sent, no API calls that change data); such a tool runs in Plan mode without asking, every other tool asks the user first there. "status" optional: what the user sees while the tool runs, in plain words, e.g. "Searching for leads" (the user never sees tool names; default "Working"). Other keys (name, input, output ...) are ignored and the build warns: prose belongs in tools/doc/<name>.md.
+   "parameters" is a JSON Schema object; without it the LLM sees a tool with no arguments, so declare every argument the tool reads. "timeout_s" optional. "network": true optional (offline agents only, see Network). "readonly": true optional: only for a tool that changes nothing anywhere (no file writes, no messages sent, no API calls that change data); such a tool runs in Plan mode without asking, every other tool asks the user first there. "status" optional: what the user sees while the tool runs, in plain words, e.g. "Searching for leads" (the user never sees tool names; default "Working"). "example" REQUIRED in practice: a realistic, harmless input object (a search, a check, a read; never a real send, post or delete) that tool_test runs the tool with. Other keys (name, input, output ...) are ignored and the build warns: prose belongs in tools/doc/<name>.md.
 3. tools/doc/<name>.md     optional prose: examples, caveats. The agent reads it with vfs_read.
 4. tools/src/<name>/       source of COMPILED tools only (never embedded, never deleted).
 
@@ -53,8 +54,7 @@ args = json.load(sys.stdin)
 n = int(args.get("n", 1))
 print(sum(range(1, n + 1)))
 ```
-The file does not need the executable bit (the agent runs it from memory). Test it by hand:
-  shell_exec: echo '{"n": 10}' | python3 tools/bin/<name>
+The file does not need the executable bit (the agent runs it from memory). Test it for real with tool_test {"tool": "<name>"}: it runs the tool with the descriptor's "example" exactly as the agent will and shows exit code, stdout and stderr. Read the output: a tool that exits 0 but prints empty or wrong fields is still broken. Fix and run tool_test again until it is ok (a tool that needs credentials the user has not given yet should fail with the clear "Missing X in .env" message).
 
 ## Kind 2: native executable
 Any language that produces an x86-64 Linux ELF. Static linking makes it run on any Linux; a dynamically linked tool only runs where its shared libraries exist (the build warns).
@@ -83,7 +83,7 @@ Rules for any tool that uses the network:
 ## Checklist
 - Descriptor valid JSON? Every bin has a .json, every .json has a bin.
 - Reads its arguments from stdin JSON, and the descriptor's "parameters" lists every one of them.
-- Tested with realistic input AND with bad input (it should exit non-zero with a clear message). Real output, no mocks.
+- tool_test says ok, and its stdout shows the real fields you expect (run against the real service). Bad input exits non-zero with a clear message. Real output, no mocks.
 - Writes only inside the working directory. In an offline agent: "network": true only for a real reason.
 - Mentioned in the relevant skill, so the agent knows when to use it.
 - Then build (build-agent skill).

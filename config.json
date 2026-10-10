@@ -16,7 +16,8 @@
   ],
   "tools": [
     "agent_build",
-    "agent_inspect"
+    "agent_inspect",
+    "tool_test"
   ],
   "requires": [
     "git"

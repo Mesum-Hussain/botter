@@ -377,6 +377,21 @@ mkdir -p "$T/proj" && echo "You are built by the test." >"$T/proj/agent.md"
 tool_call agent_build '{}'
 drive "$BOTTER" "$T/proj" BOTTER_TUI=0
 check "botter: agent_build builds a .bot from inside the sandbox" "$T/rec/tool.txt" "wrote .*proj\\.bot"
+# tool_test: runs each tool with its descriptor's example, like botcore does
+mkdir -p "$T/tt/tools/bin" "$T/tt/tools/doc"
+printf '#!/usr/bin/env python3\nimport json, sys\na = json.load(sys.stdin)\nprint("echo:", a["q"])\n' >"$T/tt/tools/bin/good"
+printf '#!/bin/sh\ncat >/dev/null\necho "Missing KEY in .env" >&2\nexit 3\n' >"$T/tt/tools/bin/bad"
+printf '#!/bin/sh\ncat\n' >"$T/tt/tools/bin/noex"
+echo '{"description": "d", "parameters": {"type": "object", "properties": {"q": {"type": "string"}}}, "example": {"q": "hi"}}' >"$T/tt/tools/doc/good.json"
+echo '{"description": "d", "parameters": {"type": "object", "properties": {}}, "example": {}}' >"$T/tt/tools/doc/bad.json"
+echo '{"description": "d", "parameters": {"type": "object", "properties": {}}}' >"$T/tt/tools/doc/noex.json"
+tool_call tool_test '{"dir": "tt"}'
+drive "$BOTTER" "$T" BOTTER_TUI=0
+check "tool_test: a working tool runs with its example (stdin JSON, no exec bit)" "$T/rec/tool.txt" "good: ok"
+check "tool_test: its real output is shown" "$T/rec/tool.txt" "stdout: echo: hi"
+check "tool_test: a failing tool shows exit code and stderr" "$T/rec/tool.txt" "exit code: 3"
+check "tool_test: stderr reaches the model" "$T/rec/tool.txt" "Missing KEY in .env"
+check "tool_test: a tool without example is reported" "$T/rec/tool.txt" 'noex: NOT TESTED: add .example.'
 [ -x "$T/proj/proj.bot" ] && pass "botter: the built agent is executable" || fail "botter: the built agent is executable"
 
 # ---------------------------------------------------------------------------

@@ -18,7 +18,7 @@ STRIP_NOTES ?= -R .comment -R .note.gnu.property -R .annobin.notes -R .gnu.build
 
 BOTCORE_DIR = tools/src/botcore
 PACK_DIR    = tools/src/pack
-TOOL_NAMES  = agent_build agent_inspect
+TOOL_NAMES  = agent_build agent_inspect tool_test
 TOOL_BINS   = $(addprefix tools/bin/,$(TOOL_NAMES))
 CJSON       = $(BOTCORE_DIR)/lib/cjson
 

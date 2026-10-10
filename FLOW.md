@@ -57,10 +57,14 @@ STEP 3: WRITE
 2. SET `tools` TO the tools in `plan` as a JSON array of {"name", "purpose"} objects, or [] if it has none
 3. FOR EACH `tool` IN `tools` DO
        INVOKE SKILL "write-tool" USING context `tool`
-       RETRY UP TO 3 TIMES DO
-           Test the tool `tool.name` by hand with shell_exec and realistic stdin JSON, and fix it if it fails.
-       END RETRY
    END FOR
+   EXECUTE tool `tool_test` with payload { "dir": "." }
+   SAVE result INTO VARIABLE `tested`
+   WHILE `tested` CONTAINS "FAILED" AT MOST 4 TIMES DO
+       Fix the tools (or their "example") so that each FAILED one below works for real, then nothing else: `tested`
+       EXECUTE tool `tool_test` with payload { "dir": "." }
+       SAVE result INTO VARIABLE `tested`
+   END WHILE
 4. Write config.json as the project-layout skill says: name (this folder's name), display_name, version (0.1.0 for a new agent; for a changed one, bump PATCH for fixes, MINOR for new abilities, MAJOR for changed behaviour), a one-sentence description, "internet": false only if `plan` says the agent must work offline, the skills and tools written above, and in "requires" every program they need on the machine.
 5. IF `plan` describes more than one step for the agent THEN
        INVOKE SKILL "write-flow" USING context `plan`

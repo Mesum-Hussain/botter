@@ -1,13 +1,14 @@
 ---
 name: build-agent
-description: How to validate, build and verify the .bot file with agent_build and agent_inspect, and how to read their messages. Read before building.
+description: How to test the tools, validate, build and verify the .bot file with tool_test, agent_build and agent_inspect, and how to read their messages. Read before building.
 ---
 
 # Building
 
 Steps
-1. agent_build {"dry_run": true}  validate only. Fix every "error" line, then repeat until it says "check passed".
-2. agent_build {}                 build ./<project folder name>.bot in the working directory (or pass "output").
+0. tool_test {}                   runs every tool for real with its descriptor's "example". Fix each FAILED tool until all are ok.
+1. agent_build {"dry_run": true}  validate only. Fix every "error:" and "warning:" line, then repeat until it says "check passed" with 0 warnings.
+2. agent_build {}                 build ./<project folder name>.bot in the working directory (or pass "output"). Build once, at the end, after 0 and 1 pass: every build costs time.
 3. agent_inspect {"file": "<name>.bot"}   list the embedded files and tools; confirm everything expected is there.
 4. Tell the user to run it: ./<name>.bot
 
