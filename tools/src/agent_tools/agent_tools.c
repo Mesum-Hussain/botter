@@ -455,7 +455,11 @@ static int cmd_test(const cJSON *args)
     if (!ran && !failed) {
         sb_add(&s, "%s\n", only ? "no such tool in tools/bin" : "this project has no tools in tools/bin");
     }
-    sb_add(&s, "%d tool(s) tested, %d FAILED or not tested (NEEDS SETUP is not a failure)\n", ran, failed);
+    if (failed) {
+        sb_add(&s, "%d tool(s) tested, %d FAILED or not tested (NEEDS SETUP is not a failure)\n", ran, failed);
+    } else {
+        sb_add(&s, "%d tool(s) tested: all ok (NEEDS SETUP only waits for the user's .env)\n", ran);
+    }
     fputs(s.p ? s.p : "", stdout);
     return 0;
 }
