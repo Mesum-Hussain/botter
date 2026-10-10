@@ -67,8 +67,6 @@ class H(BaseHTTPRequestHandler):
 
         stream = bool(req.get("stream"))
         save("stream.txt", "stream" if stream else "plain")
-        if req.get("tool_choice"):
-            save("tool_choice.txt", "%s with %d tools" % (req["tool_choice"], len(req.get("tools") or [])))
         if stream and a.nostream:
             self.send({"error": {"message": "stream not supported"}}, 400)
             return
@@ -117,6 +115,8 @@ class H(BaseHTTPRequestHandler):
                 f.write(last.split("\n")[0] + "\n")
             if last.startswith("[Owl] Decide"):
                 save("decide.txt", last)
+                save("decide_hist.txt", "tool messages: %d, tools offered: %d" % (
+                    sum(1 for m in msgs if m["role"] == "tool" or m.get("tool_calls")), len(req.get("tools") or [])))
                 reply({"content": a.owl})
             elif last.startswith("[Owl] Work out"):
                 reply({"content": '"worked-out value"'})

@@ -331,7 +331,7 @@ stub_start --owl yes
 sq_drive
 check "Owl: ASK USER shows the question" "$T/out" "What is your name\\?"
 check "Owl: RETURN joins the answer, a prose decision and .length" "$T/out" "Hi Alice, mood happy, 3 items"
-check "Owl: decisions offer the tools but forbid calling them (Gemini)" "$T/rec/tool_choice.txt" "^none with [1-9]"
+check "Owl: decisions get the history as text, no tool calls (Gemini answers those with a call)" "$T/rec/decide_hist.txt" "tool messages: 0, tools offered: 0"
 check "Owl: STEP headings are shown" "$T/out" "Step 2 · WORK"
 check "Owl: EXECUTE runs the tool itself" "$T/out" "Running a command"
 check "Owl: RETRY repeats a failing step" "$T/out" "Retrying \\(2 of 2\\)"

@@ -711,6 +711,67 @@ static int busy_wait(int attempt)
     return 0;
 }
 
+/* The history as plain text for a side question (Owl decisions, values): tool calls
+ * and results become text, so the model answers in words. With real tool calls in
+ * the history Gemini answers with another call, even under "tool_choice": "none". */
+static void text_add(cJSON *msgs, const char *role, const char *text)
+{
+    cJSON *last = cJSON_GetArrayItem(msgs, cJSON_GetArraySize(msgs) - 1);
+    const cJSON *lr = cJSON_GetObjectItemCaseSensitive(last, "role");
+    const cJSON *lc = cJSON_GetObjectItemCaseSensitive(last, "content");
+    if (cJSON_IsString(lr) && !strcmp(lr->valuestring, role) && cJSON_IsString(lc)) {
+        char *j = NULL;
+        if (asprintf(&j, "%s\n\n%s", lc->valuestring, text) >= 0) {
+            cJSON_SetValuestring((cJSON *)lc, j);
+        }
+        free(j);
+        return;
+    }
+    add_msg(msgs, role, text);
+}
+
+static void text_history(const cJSON *hist, cJSON *msgs)
+{
+    const cJSON *m;
+    cJSON_ArrayForEach(m, hist)
+    {
+        const cJSON *role = cJSON_GetObjectItemCaseSensitive(m, "role");
+        const cJSON *content = cJSON_GetObjectItemCaseSensitive(m, "content");
+        const cJSON *calls = cJSON_GetObjectItemCaseSensitive(m, "tool_calls"), *tc;
+        const char *rs = cJSON_IsString(role) ? role->valuestring : "";
+        char *text = extract_content(content), *t = NULL;
+        if (!strcmp(rs, "tool")) {
+            if (asprintf(&t, "[tool result] %.1500s%s", text ? text : "", text && strlen(text) > 1500 ? " ...(cut)" : "") >= 0) {
+                text_add(msgs, "user", t);
+            }
+        } else if (!strcmp(rs, "assistant")) {
+            size_t len = 0;
+            char *acc = NULL;
+            FILE *f = open_memstream(&acc, &len);
+            if (f) {
+                fputs(text ? text : "", f);
+                cJSON_ArrayForEach(tc, calls)
+                {
+                    const cJSON *fn = cJSON_GetObjectItemCaseSensitive(tc, "function");
+                    const cJSON *nm = cJSON_GetObjectItemCaseSensitive(fn, "name");
+                    const cJSON *ar = cJSON_GetObjectItemCaseSensitive(fn, "arguments");
+                    fprintf(f, "%s[called %s %.300s]", ftell(f) ? "\n" : "", cJSON_IsString(nm) ? nm->valuestring : "a tool",
+                            cJSON_IsString(ar) ? ar->valuestring : "");
+                }
+                fclose(f);
+                if (acc && *acc) {
+                    text_add(msgs, "assistant", acc);
+                }
+                free(acc);
+            }
+        } else if (text && (*rs)) {
+            text_add(msgs, rs, text);
+        }
+        free(t);
+        free(text);
+    }
+}
+
 int chat_ask(chat_t *c, const char *system, const char *question, int with_history, char **reply, char **err)
 {
     http_resp_t r;
@@ -721,21 +782,11 @@ int chat_ask(chat_t *c, const char *system, const char *question, int with_histo
     cJSON *msgs = cJSON_AddArrayToObject(root, "messages");
     cJSON_AddStringToObject(root, "model", c->model);
     if (with_history) {
-        const cJSON *m;
-        cJSON_ArrayForEach(m, c->hist)
-        {
-            cJSON_AddItemToArray(msgs, cJSON_Duplicate(m, 1));
-        }
+        text_history(c->hist, msgs);
     } else if (system && *system) {
         add_msg(msgs, "system", system);
     }
     add_msg(msgs, "user", question);
-    if (with_history && c->tools && cJSON_GetArraySize(c->tools) > 0) {
-        /* a history full of tool calls but no tools on offer: Gemini answers with a
-         * call anyway (no content). Offer them and forbid their use. */
-        cJSON_AddItemReferenceToObject(root, "tools", c->tools);
-        cJSON_AddStringToObject(root, "tool_choice", "none");
-    }
     char *body = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (!url || !body) {
