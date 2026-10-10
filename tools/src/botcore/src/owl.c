@@ -436,6 +436,32 @@ static void sq_instr(sq_ps *s, const char *t)
     x->a = sq_dup(t, strlen(t));
 }
 
+/* Placeholder text in a tool's arguments ("Helpful response...", "TODO") would be
+ * sent as it is: the real text must be produced first (INVOKE SKILL, SET ... TO). */
+static void sq_placeholder(sq_prog *p, int line, const char *v)
+{
+    for (const char *c = v; (c = strchr(c, '"'));) {
+        const char *e = c + 1;
+        while (*e && *e != '"') {
+            e += *e == '\\' && e[1] ? 2 : 1;
+        }
+        size_t n = (size_t)(e - c - 1);
+        char lit[120];
+        snprintf(lit, sizeof(lit), "%.*s", (int)(n < sizeof(lit) - 1 ? n : sizeof(lit) - 1), c + 1);
+        if (strstr(lit, "...") || strstr(lit, "\xe2\x80\xa6") || !strcasecmp(lit, "TODO") || !strcasecmp(lit, "TBD") ||
+            strcasestr(lit, "placeholder") || strcasestr(lit, "lorem ipsum")) {
+            sq_diag(p, line, 1,
+                    "\"%s\" is placeholder text and would be sent as it is: produce the real value first "
+                    "(INVOKE SKILL ... then SAVE skill_output, or SET `x` TO <what it should say>) and pass `x`",
+                    lit);
+        }
+        if (!*e) {
+            break;
+        }
+        c = e + 1;
+    }
+}
+
 /* One statement (list marker and indentation removed). */
 static void sq_stmt(sq_ps *s, char *t)
 {
@@ -522,6 +548,7 @@ static void sq_stmt(sq_ps *s, char *t)
         sq_node *x = sq_add(s, SQ_EXEC);
         x->a = sq_dup(var, strlen(var));
         e = sq_skip(e);
+        sq_placeholder(p, s->line, e);
         x->b = sq_dup(e, strlen(e));
         s->last = x;
         s->params = colon;
@@ -933,6 +960,9 @@ int sq_parse(const char *src, size_t n, sq_prog *p)
                 const char *v = sq_skip(c + 1);
                 sq_syntax(p, s.line, v, 1);
                 sq_node *x = s.last;
+                if (x->kind == SQ_EXEC) {
+                    sq_placeholder(p, s.line, v);
+                }
                 x->pk = realloc(x->pk, (size_t)(x->np + 1) * sizeof(char *));
                 x->pv = realloc(x->pv, (size_t)(x->np + 1) * sizeof(char *));
                 x->pl = realloc(x->pl, (size_t)(x->np + 1) * sizeof(int));
