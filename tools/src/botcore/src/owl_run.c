@@ -795,6 +795,15 @@ static int st_invoke(rt_t *r, sq_node *x)
     free(m);
     if (rc != Q_ABORT) {
         cJSON *v = out ? cJSON_Parse(out) : NULL;
+        const char *o = out ? out + strspn(out, " \t\r\n") : "";
+        if (!v && !strncmp(o, "```", 3) && strchr(o, '\n')) { /* ```json fenced JSON */
+            char *in = strdup(strchr(o, '\n') + 1), *end = in ? strstr(in, "```") : NULL;
+            if (end) {
+                *end = '\0';
+                v = cJSON_Parse(in);
+            }
+            free(in);
+        }
         set_var(r, "skill_output", v ? v : cJSON_CreateString(out ? out : ""));
     }
     free(out);

@@ -39,4 +39,4 @@ Follow these steps in order. Keep the conversation short.
 - Test every tool by hand with realistic stdin JSON before building (see write-tool). A build only checks file formats, not that tools work.
 
 ## Iterating
-After the first build, the user usually wants changes. Edit the files, bump "version" in config.json (PATCH for fixes, MINOR for new abilities, MAJOR for changed behaviour), then dry_run and build again. The new build overwrites the old .bot of the same name.
+After the first build, the user usually wants changes. Read each file before changing it and edit it in place: change only what the request needs and never drop an action, parameter, step or rule that still belongs (rewriting a tool from memory loses working features). Edit the files, bump "version" in config.json (PATCH for fixes, MINOR for new abilities, MAJOR for changed behaviour), then dry_run and build again. The new build overwrites the old .bot of the same name.

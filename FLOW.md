@@ -11,6 +11,7 @@ LOAD SKILL "write-agent-md-and-skills"
 LOAD SKILL "write-tool"
 LOAD SKILL "write-flow"
 LOAD SKILL "wrap-existing-project"
+LOAD SKILL "review-agent"
 LOAD SKILL "build-agent"
 
 STEP 1: UNDERSTAND
@@ -64,6 +65,11 @@ STEP 3: WRITE
 5. IF `plan` describes more than one step for the agent THEN
        INVOKE SKILL "write-flow" USING context `plan`
    END IF
+6. INVOKE SKILL "review-agent" USING context { "request": `request`, "details": `details`, "plan": `plan` }
+7. SAVE skill_output INTO VARIABLE `gaps`
+8. FOR EACH `gap` IN `gaps` DO
+       Fix this gap, changing only what it needs and keeping every other action, step and rule that works: `gap`
+   END FOR
 
 STEP 4: CHECK
 1. INVOKE SKILL "build-agent" USING context `plan`

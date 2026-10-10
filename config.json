@@ -11,9 +11,15 @@
     "write-tool",
     "write-flow",
     "wrap-existing-project",
+    "review-agent",
     "build-agent"
   ],
-  "tools": ["agent_build", "agent_inspect"],
-  "requires": ["git"],
+  "tools": [
+    "agent_build",
+    "agent_inspect"
+  ],
+  "requires": [
+    "git"
+  ],
   "builder": true
 }
