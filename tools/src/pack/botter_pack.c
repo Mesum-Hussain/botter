@@ -803,7 +803,17 @@ static void check_script(const item_t *it)
     if (py ? strstr(low, "sys.argv[1") != NULL : strstr(it->data, "$1") != NULL) {
         diagf(0, "%s reads command-line arguments; botcore passes none (arguments arrive as JSON on stdin)", it->path);
     }
-    if (strstr(it->data, "artifacts/")) {
+    int uses_art = 0; /* outside comments: a credit line naming the source is fine */
+    for (const char *l = it->data, *end = it->data + it->len; l < end && !uses_art;) {
+        const char *nl = memchr(l, '\n', (size_t)(end - l));
+        size_t      n = nl ? (size_t)(nl - l) : (size_t)(end - l);
+        size_t      k = strspn(l, " \t");
+        if (k < n && l[k] != '#' && strncmp(l + k, "//", 2) != 0) {
+            uses_art = memmem(l, n, "artifacts/", 10) != NULL;
+        }
+        l += n + 1;
+    }
+    if (uses_art) {
         diagf(1, "%s uses files under artifacts/, which are not part of the .bot (the agent must run in any "
                  "folder): copy the code it needs into the tool itself, keeping the licence notice",
               it->path);

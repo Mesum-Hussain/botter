@@ -182,10 +182,13 @@ check "contracts: a skill without frontmatter is an error" "$T/build.log" 'error
 check "contracts: a tool that reads argv is a warning" "$T/build.log" 'tools/bin/argv reads command-line arguments'
 check "contracts: a tool that does not read stdin is a warning" "$T/build.log" 'tools/bin/argv does not seem to read stdin'
 check "contracts: mock output in a tool is a warning" "$T/build.log" 'tools/bin/argv mentions "mock"'
-printf '#!/bin/sh\ncat >/dev/null\npython3 artifacts/kit/scrape.py\n' >"$T/ctr/tools/bin/uses_art"
+printf '#!/bin/sh\n# adapted from artifacts/kit/scrape.py (MIT)\ncat >/dev/null\npython3 artifacts/kit/scrape.py\n' >"$T/ctr/tools/bin/uses_art"
 echo '{"description": "d", "parameters": {"type": "object", "properties": {}}}' >"$T/ctr/tools/doc/uses_art.json"
 "$PACK" check "$T/ctr" "$CORE" >"$T/build.log" 2>&1
 check "contracts: a tool that runs code from artifacts/ is an error" "$T/build.log" 'error: tools/bin/uses_art uses files under artifacts/'
+printf '#!/bin/sh\n# adapted from artifacts/kit/scrape.py (MIT)\ncat\n' >"$T/ctr/tools/bin/uses_art"
+"$PACK" check "$T/ctr" "$CORE" >"$T/build.log" 2>&1
+check_not "contracts: a comment crediting artifacts/ is fine" "$T/build.log" 'uses_art uses files under artifacts/'
 
 # ---------------------------------------------------------------------------
 section "Runtime: network modes, sandbox, system prompt (stub LLM)"

@@ -699,9 +699,29 @@ static int busy_status(int status)
     return status == 429 || status == 500 || status == 502 || status == 503 || status == 504;
 }
 
-static int busy_wait(int attempt)
+/* How long the endpoint asks us to wait: Gemini's quota errors say "Please retry in
+ * 34.5s" and carry "retryDelay": "34s". 0 if it does not say. */
+static int retry_hint_s(const char *body)
 {
-    for (int ms = 0; ms < (2000 << attempt); ms += 200) {
+    const char *p = body ? strstr(body, "retry in ") : NULL;
+    if (p) {
+        return (int)strtod(p + 9, NULL) + 1;
+    }
+    p = body ? strstr(body, "\"retryDelay\"") : NULL;
+    if (p && (p = strchr(p + 12, '"'))) {
+        return (int)strtod(p + 1, NULL) + 1;
+    }
+    return 0;
+}
+
+/* Wait 2, 4, 8 ... s, or as long as the endpoint asked (at most 2 minutes). */
+static int busy_wait(int attempt, const char *body)
+{
+    int ms = 2000 << attempt, hint = retry_hint_s(body) * 1000;
+    if (hint > ms) {
+        ms = hint > 120000 ? 120000 : hint;
+    }
+    for (int t = 0; t < ms; t += 200) {
         if (term_interrupted()) {
             return -1;
         }
@@ -807,8 +827,9 @@ int chat_ask(chat_t *c, const char *system, const char *question, int with_histo
             break;
         }
         if (busy_status(r.status) && busy < CHAT_BUSY_RETRIES) {
+            int stop = busy_wait(busy++, r.body);
             http_resp_free(&r);
-            if (busy_wait(busy++) < 0) {
+            if (stop < 0) {
                 ret = CHAT_ERR_ABORT;
                 break;
             }
@@ -920,9 +941,10 @@ int chat_send(chat_t *c, const char *user, char **reply, char **err)
             goto fail;
         }
         if (busy_status(r.status) && busy < CHAT_BUSY_RETRIES) {
+            int stop = busy_wait(busy++, r.body);
             http_resp_free(&r);
             stream_free(&st);
-            if (busy_wait(busy++) < 0) {
+            if (stop < 0) {
                 ret = CHAT_ERR_ABORT;
                 goto fail;
             }
