@@ -41,7 +41,7 @@ STEP 1: UNDERSTAND
    END IF
 
 STEP 2: PLAN
-1. INVOKE SKILL "create-agent" USING context { "request": `request`, "details": `details`, "repo_notes": `repo_notes`, "now": "Only plan in this step: write no files and run no builds. Reply with the plan itself: the agent's name, its role, its skills, its tools (name, purpose, input JSON, what it calls), its FLOW.md steps, its state files and what must be installed or running." }
+1. INVOKE SKILL "create-agent" USING context { "request": `request`, "details": `details`, "repo_notes": `repo_notes`, "now": "Only plan in this step: write no files and run no builds. Reply with the plan itself, starting with Requirements: every input, behaviour, rule, limit and notification in `request` and `details`, each followed by the tool action, skill or FLOW.md step that implements it (nothing may be left out). Then the agent's name, its role, its skills, its tools (name, purpose, input JSON, what it calls), its FLOW.md steps, its state files and what must be installed or running." }
 2. SAVE skill_output INTO VARIABLE `plan`
 3. ASK USER "That is my plan (above). Shall I build it? Say yes, or tell me what to change."
 4. WHILE `answer` is not an approval of the plan AT MOST 3 TIMES DO

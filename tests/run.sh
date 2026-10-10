@@ -339,7 +339,8 @@ check "Owl: SAVE TO FILE writes the value" "$T/sqws/out/items.json" '"b"'
 n=$(grep -c "" "$T/rec/owl.txt" 2>/dev/null)
 if [ "$n" = 2 ]; then pass "Owl: only prose reaches the LLM (2 calls for the whole flow)"; else fail "Owl: only prose reaches the LLM (2 calls for the whole flow)" "LLM calls: $n"; fi
 check "Owl: FOR EACH + IF run the plain-English step for the matching item" "$T/rec/owl.txt" "line 16\\] Mention the letter"
-check "Owl: a prose condition is decided by the LLM" "$T/rec/owl.txt" "Decide whether this condition is true right now: the user seems happy"
+check "Owl: a prose condition is decided by the LLM" "$T/rec/owl.txt" 'Decide whether this condition is true right now: the user `name` seems happy'
+check "Owl: a decision shows the variables it names in full" "$T/rec/decide.txt" '^`name` = Alice'
 stub_start --owl no
 sq_drive
 check "Owl: the LLM's 'no' takes the ELSE branch" "$T/out" "Hi Alice, mood sad"

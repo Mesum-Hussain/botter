@@ -422,15 +422,48 @@ static cJSON *eval_literal(rt_t *r, const char *expr)
 }
 
 /* Any expression: literal ones here, prose ones by the LLM. NULL if interrupted. */
+/* The variables a prose condition or value names, in full (up to 3000 chars each):
+ * the general dump is cut at DUMP_MAX, which can drop the one value that decides
+ * (the user's "yes" after a long plan). */
+static char *named_values(rt_t *r, const char *text)
+{
+    char *acc = NULL;
+    size_t len = 0;
+    for (const char *c = strchr(text, '`'); c; c = strchr(c, '`')) {
+        const char *e = strchr(c + 1, '`');
+        if (!e) {
+            break;
+        }
+        size_t n = strcspn(c + 1, ".`");
+        char name[65];
+        snprintf(name, sizeof(name), "%.*s", (int)(n < 64 ? n : 64), c + 1);
+        const cJSON *v = cJSON_GetObjectItemCaseSensitive(r->vars, name);
+        char tag[80];
+        snprintf(tag, sizeof(tag), "`%s` =", name);
+        if (v && !(acc && strstr(acc, tag))) {
+            char *t = val_text(v), *line = NULL;
+            if (asprintf(&line, "%s %.3000s%s\n", tag, t ? t : "", t && strlen(t) > 3000 ? " ...(cut)" : "") >= 0) {
+                show_cat(&acc, &len, line);
+            }
+            free(line);
+            free(t);
+        }
+        c = e + 1;
+    }
+    return acc ? acc : strdup("");
+}
+
 static cJSON *eval(rt_t *r, const char *expr, int *abort)
 {
     if (sq_is_literal(expr)) {
         return eval_literal(r, expr);
     }
+    char *nv = named_values(r, expr);
     char *q = step_msg(r, 0,
-                       "[Owl] Work out this value: %s\nReply with only the value as JSON (a \"string\", a number, an "
+                       "[Owl] Work out this value: %s\n%sReply with only the value as JSON (a \"string\", a number, an "
                        "array or an object), nothing else.",
-                       expr);
+                       expr, nv);
+    free(nv);
     char *ans = NULL;
     int rc = q ? r->io->ask_llm(r->io->ud, q, &ans) : -1;
     free(q);
@@ -626,10 +659,12 @@ static int cond(rt_t *r, const char *c, int *abort)
     if (v >= 0) {
         return v;
     }
+    char *nv = named_values(r, c);
     char *q = step_msg(r, 0,
-                       "[Owl] Decide whether this condition is true right now: %s\nReply with exactly one word: yes "
-                       "or no.",
-                       c);
+                       "[Owl] Decide whether this condition is true right now: %s\n%sReply with exactly one word: yes "
+                       "(the condition holds) or no (it does not).",
+                       c, nv);
+    free(nv);
     char *ans = NULL;
     int rc = q ? r->io->ask_llm(r->io->ud, q, &ans) : -1;
     free(q);

@@ -16,7 +16,7 @@ FOR EACH `it` IN `items` DO
         Mention the letter `it`.
     END IF
 END FOR
-IF the user seems happy THEN
+IF the user `name` seems happy THEN
     SET `mood` TO "happy"
 ELSE
     SET `mood` TO "sad"

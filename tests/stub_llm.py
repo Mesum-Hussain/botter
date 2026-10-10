@@ -116,6 +116,7 @@ class H(BaseHTTPRequestHandler):
             with open(os.path.join(a.record, "owl.txt"), "a") as f:
                 f.write(last.split("\n")[0] + "\n")
             if last.startswith("[Owl] Decide"):
+                save("decide.txt", last)
                 reply({"content": a.owl})
             elif last.startswith("[Owl] Work out"):
                 reply({"content": '"worked-out value"'})
