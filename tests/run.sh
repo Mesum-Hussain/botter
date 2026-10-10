@@ -94,6 +94,7 @@ sq_bad() {
 }
 sq_bad "capital pseudo-code is not a statement" 'Skip it.' 'SEARCH LEADS (with the scraper)' 'error: "SEARCH LEADS" is not an Owl statement'
 sq_bad "placeholder text in a tool argument is an error" '{ "path": `folder` }' '{ "path": "TODO" }' 'error: "TODO" is placeholder text'
+sq_bad "BREAK is not Owl" 'Skip it.' 'BREAK' 'error: Owl has no BREAK'
 sq_bad "keyword typo is an error with its line" 'INVOKE SKILL' 'INVOCATE SKILL' 'FLOW.md:15: error: unknown keyword INVOCATE; did you mean INVOKE'
 if [ -e "$T/flow_bad.bot" ]; then fail "Owl: a flow with errors is not built"; else pass "Owl: a flow with errors is not built"; fi
 sq_bad "unknown tool" '`fs_read`' '`fs_reed`' 'no such tool'

@@ -395,6 +395,13 @@ static const char *const SQ_KW[] = {"STEP", "LOAD", "CONNECT", "EXECUTE", "INVOK
 /* An UPPERCASE first word that is no keyword: a typo of one (error), or a shouted word (prose). */
 static int sq_unknown(sq_ps *s, const char *w)
 {
+    if (!strcmp(w, "BREAK") || !strcmp(w, "CONTINUE") || !strcmp(w, "GOTO") || !strcmp(w, "EXIT")) {
+        sq_diag(s->p, s->line, 1,
+                "Owl has no %s: to skip the rest of an item, put it inside an IF; to stop a loop early, use "
+                "WHILE ... AT MOST N TIMES with a condition, or RETURN to end the flow",
+                w);
+        return 1;
+    }
     static const char *const alias[][2] = {{"INVOCATE", "INVOKE"}, {"INVOKES", "INVOKE"}, {"EXEC", "EXECUTE"},
                                            {"CALL", "EXECUTE"},    {"RUN", "EXECUTE"},    {"STORE", "SAVE"},
                                            {"FOREACH", "FOR EACH"}, {"ELIF", "ELSE IF"},  {"ELSEIF", "ELSE IF"},
