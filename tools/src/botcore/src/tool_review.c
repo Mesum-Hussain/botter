@@ -1,7 +1,7 @@
 /*
- * sqnc_review: the logic check of an agent project's SQNC.md, by the connected
+ * owl_review: the logic check of an agent project's FLOW.md, by the connected
  * LLM (a fresh request, no conversation). The syntax and names are checked by
- * the build (sqnc.c); this asks whether the steps make sense: can each step be
+ * the build (owl.c); this asks whether the steps make sense: can each step be
  * done with the named tool or skill and the data available then, do payloads
  * fit the tools' parameters, are loops bounded, is anything outward-facing done
  * without asking, does the flow fit what agent.md says the agent is for.
@@ -10,7 +10,7 @@
 #define _GNU_SOURCE
 #include "chat.h"
 #include "guard.h"
-#include "sqnc.h"
+#include "owl.h"
 #include "tools.h"
 
 #include <dirent.h>
@@ -81,7 +81,7 @@ static void sb_fmt(sb_t *b, const char *fmt, ...)
 static void diag_collect(void *ud, int line, int error, const char *msg)
 {
     if (error) {
-        sb_fmt(ud, "SQNC.md:%d: %s\n", line, msg);
+        sb_fmt(ud, "FLOW.md:%d: %s\n", line, msg);
     }
 }
 
@@ -129,8 +129,8 @@ static void add_capabilities(sb_t *b, const char *dir)
 }
 
 static const char REVIEWER[] =
-    "You review SQNC.md, the step-by-step flow of an AI agent, written in Sqnc. Its syntax and names are already "
-    "checked; judge only whether the LOGIC makes sense. How Sqnc runs: botcore executes the structure itself "
+    "You review FLOW.md, the step-by-step flow of an AI agent, written in Owl. Its syntax and names are already "
+    "checked; judge only whether the LOGIC makes sense. How Owl runs: botcore executes the structure itself "
     "(EXECUTE tool calls the tool with the payload or parameters, its output is `result`; ASK USER shows the "
     "question and waits, the reply is `answer`; SAVE/SET store values; IF, FOR EACH, WHILE ... AT MOST N TIMES, "
     "RETRY UP TO N TIMES (repeats its body while a step in it fails) and IN PARALLEL control the order; comparisons "
@@ -147,10 +147,10 @@ static const char REVIEWER[] =
     "tells the user nothing useful. Ignore style and wording.\n"
     "Reply with only JSON: {\"makes_sense\": true or false, \"summary\": \"one sentence\", \"problems\": "
     "[{\"line\": N, \"statement\": \"the line\", \"why\": \"why it does not make sense\", \"suggestion\": \"the "
-    "corrected Sqnc line(s), or what to do instead\"}]}. makes_sense is false only if there is at least one real "
+    "corrected Owl line(s), or what to do instead\"}]}. makes_sense is false only if there is at least one real "
     "problem; then list each one.";
 
-static bool sqnc_review(const cJSON *in, char *result, size_t rl)
+static bool owl_review(const cJSON *in, char *result, size_t rl)
 {
     const cJSON *dj = cJSON_GetObjectItemCaseSensitive(in, "dir");
     const char *dir = cJSON_IsString(dj) && *dj->valuestring ? dj->valuestring : ".";
@@ -164,10 +164,10 @@ static bool sqnc_review(const cJSON *in, char *result, size_t rl)
         snprintf(result, rl, "'%s' must be a project folder inside the working directory", dir);
         return false;
     }
-    snprintf(f, sizeof(f), "%s/SQNC.md", res);
+    snprintf(f, sizeof(f), "%s/FLOW.md", res);
     char *src = slurp(f, 200000);
     if (!src) {
-        snprintf(result, rl, "%s has no SQNC.md", dir);
+        snprintf(result, rl, "%s has no FLOW.md", dir);
         return false;
     }
 
@@ -181,7 +181,7 @@ static bool sqnc_review(const cJSON *in, char *result, size_t rl)
     sq_free(&prog);
     if (ne) {
         snprintf(result, rl,
-                 "{\"makes_sense\": false, \"summary\": \"SQNC.md has syntax errors; fix them first (agent_build "
+                 "{\"makes_sense\": false, \"summary\": \"FLOW.md has syntax errors; fix them first (agent_build "
                  "dry_run shows them)\", \"problems\": [], \"report\": %s}",
                  "\"see the syntax errors below\"");
         size_t l = strlen(result);
@@ -198,7 +198,7 @@ static bool sqnc_review(const cJSON *in, char *result, size_t rl)
     sb_fmt(&q, "## agent.md (what the agent is for)\n%s\n", agent ? agent : "(none)");
     free(agent);
     add_capabilities(&q, res);
-    sb_add(&q, "\n## SQNC.md (with line numbers)\n");
+    sb_add(&q, "\n## FLOW.md (with line numbers)\n");
     int line = 1;
     for (char *l = src, *nl; l && *l; l = nl ? nl + 1 : NULL, line++) {
         nl = strchr(l, '\n');
@@ -261,14 +261,14 @@ static bool sqnc_review(const cJSON *in, char *result, size_t rl)
 }
 
 const tool_t TOOLS_REVIEW[] = {
-    {"sqnc_review",
-     "Check whether an agent project's SQNC.md makes sense (its logic, not its syntax) with a fresh LLM review: "
+    {"owl_review",
+     "Check whether an agent project's FLOW.md makes sense (its logic, not its syntax) with a fresh LLM review: "
      "steps that cannot work, payloads that do not fit the tools, missing approvals before outward-facing steps, "
      "loops that cannot end, a flow that does not fit agent.md. Returns JSON {makes_sense, summary, problems: "
      "[{line, statement, why, suggestion}], report}. Run it after agent_build dry_run passes; if makes_sense is "
      "false, tell the user why and what the review suggests instead.",
      "{\"type\":\"object\",\"properties\":{\"dir\":{\"type\":\"string\",\"description\":\"Agent project folder, "
      "default the working directory\"}}}",
-     sqnc_review},
+     owl_review},
 };
 const size_t TOOLS_REVIEW_N = sizeof(TOOLS_REVIEW) / sizeof(TOOLS_REVIEW[0]);

@@ -25,7 +25,7 @@ Rules
 
 Working with files and tools
 - Your skills and tools are listed in your system prompt and tool definitions.
-- Do not tell the agent to read or follow SQNC.md: botcore runs it by itself and hands the agent one [Sqnc ...] step at a time. agent.md says who the agent is and its rules; SQNC.md is the order of steps.
+- Do not tell the agent to read or follow FLOW.md: botcore runs it by itself and hands the agent one [Owl ...] step at a time. agent.md says who the agent is and its rules; FLOW.md is the order of steps.
 - Before doing a task a skill covers, read that skill with vfs_read.
 - <which tools to prefer for which job, if the agent has custom tools>
 ```

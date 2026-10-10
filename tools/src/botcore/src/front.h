@@ -18,7 +18,7 @@
  *     {"ev":"tool","name":..,"args":..,"status":..} / {"ev":"tool_result","text":..}
  *     {"ev":"delta","kind":"text"|"thinking","text":..}  streamed piece of a reply
  *     {"ev":"mode","mode":"plan"|"build"}             Plan/Build mode
- *     {"ev":"flow"}                                   the agent's SQNC.md flow starts
+ *     {"ev":"flow"}                                   the agent's FLOW.md flow starts
  * UI -> botcore (stdin, one JSON object per line, answers a prompt):
  *     {"line":<text>} | {"eof":true} | {"intr":true}
  *   Interrupting work = SIGINT to the botcore process.

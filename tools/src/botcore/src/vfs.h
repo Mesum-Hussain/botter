@@ -6,7 +6,7 @@
 
 /*
  * Read-only embedded file table = the agent pack appended to this executable
- * (agent.md, config.json, SQNC.md, skills/, tools/doc/, tools/bin/). See blob.h for the
+ * (agent.md, config.json, FLOW.md, skills/, tools/doc/, tools/bin/). See blob.h for the
  * on-disk format. Entries are sorted by path (strcmp order) and every blob is
  * followed by a NUL byte that is not counted in `len`.
  */

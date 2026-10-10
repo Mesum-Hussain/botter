@@ -1,10 +1,10 @@
 /*
- * Sqnc front end: parser (syntax tree + syntax errors) and build-time checks.
- * Shared by botcore (sqnc_run.c interprets the tree) and botter_pack (which
- * #includes this file and runs sq_check). See sqnc.h and skills/write-flow.
+ * Owl front end: parser (syntax tree + syntax errors) and build-time checks.
+ * Shared by botcore (owl_run.c interprets the tree) and botter_pack (which
+ * #includes this file and runs sq_check). See owl.h and skills/write-flow.
  */
 #define _GNU_SOURCE
-#include "sqnc.h"
+#include "owl.h"
 
 #include <ctype.h>
 #include <stdarg.h>
@@ -426,7 +426,7 @@ static void sq_instr(sq_ps *s, const char *t)
                                       "RETURN", "RETRY UP TO N TIMES DO / END RETRY"};
     for (int i = 0; prose[i]; i++) {
         if (sq_word(t, prose[i]) && !isupper((unsigned char)t[1])) {
-            sq_diag(s->p, s->line, 0, "write '%s' as a Sqnc statement in capitals (%s) so the flow can be checked",
+            sq_diag(s->p, s->line, 0, "write '%s' as an Owl statement in capitals (%s) so the flow can be checked",
                     prose[i], fix[i]);
             break;
         }
@@ -769,13 +769,13 @@ static void sq_stmt(sq_ps *s, char *t)
     }
 }
 
-/* Frontmatter: spec-version "sqnc-1" required, title recommended. Offset after it, or 0. */
+/* Frontmatter: spec-version "owl-1" required, title recommended. Offset after it, or 0. */
 static size_t sq_front(sq_ps *s, const char *src, size_t n)
 {
     sq_prog *p = s->p;
     s->line++;
     if (n < 4 || strncmp(src, "---", 3) != 0 || (src[3] != '\n' && src[3] != '\r')) {
-        sq_diag(p, s->line, 1, "the frontmatter comes right after ```sqnc: ---, spec-version: \"sqnc-1\", title: \"...\", ---");
+        sq_diag(p, s->line, 1, "the frontmatter comes right after ```owl: ---, spec-version: \"owl-1\", title: \"...\", ---");
         return 0;
     }
     int ver = 0;
@@ -788,7 +788,7 @@ static size_t sq_front(sq_ps *s, const char *src, size_t n)
         i += ll + (nl != NULL);
         if (ll >= 3 && strncmp(l, "---", 3) == 0) {
             if (!ver) {
-                sq_diag(p, s->line, 1, "the frontmatter needs spec-version: \"sqnc-1\"");
+                sq_diag(p, s->line, 1, "the frontmatter needs spec-version: \"owl-1\"");
             }
             if (!p->title[0]) {
                 sq_diag(p, s->line, 0, "the frontmatter should have a title: \"...\"");
@@ -816,8 +816,8 @@ static size_t sq_front(sq_ps *s, const char *src, size_t n)
         }
         if (!strcmp(line, "spec-version")) {
             ver = 1;
-            if (strcmp(val, "sqnc-1") != 0) {
-                sq_diag(p, s->line, 1, "spec-version is \"%s\"; this botter understands \"sqnc-1\"", val);
+            if (strcmp(val, "owl-1") != 0) {
+                sq_diag(p, s->line, 1, "spec-version is \"%s\"; this botter understands \"owl-1\"", val);
             }
         } else if (!strcmp(line, "title")) {
             snprintf(p->title, sizeof(p->title), "%.199s", val);
@@ -834,14 +834,14 @@ int sq_parse(const char *src, size_t n, sq_prog *p)
     sq_ps s;
     memset(&s, 0, sizeof(s));
     s.p = p;
-    /* The whole file is one ```sqnc block: frontmatter, then statements, then the closing ```. */
+    /* The whole file is one ```owl block: frontmatter, then statements, then the closing ```. */
     size_t first = strcspn(src, "\n");
     const char *info = sq_skip(src + 3);
-    if (n < 3 || strncmp(src, "```", 3) != 0 || !sq_word(info, "sqnc")) {
+    if (n < 3 || strncmp(src, "```", 3) != 0 || !sq_word(info, "owl")) {
         sq_diag(p, 1, 1, strncmp(src, "---", 3) == 0
-                             ? "SQNC.md starts with ```sqnc on its first line; the frontmatter goes inside the block"
-                             : "SQNC.md starts with ```sqnc on its first line and ends with ``` (the whole file is "
-                               "one Sqnc block)");
+                             ? "FLOW.md starts with ```owl on its first line; the frontmatter goes inside the block"
+                             : "FLOW.md starts with ```owl on its first line and ends with ``` (the whole file is "
+                               "one Owl block)");
         return p->errors;
     }
     s.line = 1;
@@ -872,7 +872,7 @@ int sq_parse(const char *src, size_t n, sq_prog *p)
         }
         if (closed) {
             if (*t) {
-                sq_diag(p, s.line, 1, "nothing may follow the closing ``` of the Sqnc block");
+                sq_diag(p, s.line, 1, "nothing may follow the closing ``` of the Owl block");
                 break;
             }
             continue;
@@ -882,20 +882,20 @@ int sq_parse(const char *src, size_t n, sq_prog *p)
         }
         if (strncmp(t, "```", 3) == 0) {
             if (t[3]) {
-                sq_diag(p, s.line, 1, "a code block cannot start inside the Sqnc block");
+                sq_diag(p, s.line, 1, "a code block cannot start inside the Owl block");
                 continue;
             }
             closed = 1;
             s.params = 0;
             continue;
         }
-        if (*t == '#' || strncmp(t, "<!--", 4) == 0) { /* Markdown is not part of Sqnc */
+        if (*t == '#' || strncmp(t, "<!--", 4) == 0) { /* Markdown is not part of Owl */
             const char *h = t + strspn(t, "# ");
             if (*t == '#' && strncmp(h, "STEP ", 5) == 0) {
-                sq_diag(p, s.line, 1, "write the step label as Sqnc, without #: STEP n: NAME");
+                sq_diag(p, s.line, 1, "write the step label as Owl, without #: STEP n: NAME");
             } else {
-                sq_diag(p, s.line, 1, "Markdown (headings, <!-- comments -->) is not part of Sqnc; write plain "
-                                      "English or a Sqnc statement");
+                sq_diag(p, s.line, 1, "Markdown (headings, <!-- comments -->) is not part of Owl; write plain "
+                                      "English or an Owl statement");
             }
             continue;
         }
@@ -937,7 +937,7 @@ int sq_parse(const char *src, size_t n, sq_prog *p)
         }
     }
     if (!closed) {
-        sq_diag(p, s.line, 1, "the Sqnc block is never closed: end the file with ```");
+        sq_diag(p, s.line, 1, "the Owl block is never closed: end the file with ```");
     }
     while (s.depth > 0) {
         sq_frame *f = &s.st[--s.depth];

@@ -69,29 +69,29 @@ mkagent() {
 build() { "$PACK" build "$1" "$CORE" "$2" >"$T/build.log" 2>&1; }
 
 # ---------------------------------------------------------------------------
-section "Packaging and Sqnc"
+section "Packaging and Owl"
 
 "$PACK" check "$ROOT" "$CORE" >"$T/self.log" 2>&1
 check "botter's own project builds with 0 warnings" "$T/self.log" "check passed.* 0 warning"
 
-# Sqnc (SQNC.md): a valid flow compiles; each kind of mistake is an error with its line and stops the build
+# Owl (FLOW.md): a valid flow compiles; each kind of mistake is an error with its line and stops the build
 mkagent "$T/flow_good"
 mkdir -p "$T/flow_good/skills/pitching"
 printf -- '---\nname: pitching\ndescription: p\n---\n' >"$T/flow_good/skills/pitching/SKILL.md"
-cp "$TESTS/sqnc_good.md" "$T/flow_good/SQNC.md"
+cp "$TESTS/owl_good.md" "$T/flow_good/FLOW.md"
 "$PACK" check "$T/flow_good" "$CORE" >"$T/lint.log" 2>&1
-check_not "Sqnc: a valid SQNC.md has no errors or warnings" "$T/lint.log" "SQNC.md"
-# sq_bad NAME OLD NEW PATTERN: sqnc_good.md with OLD replaced by NEW must report PATTERN
+check_not "Owl: a valid FLOW.md has no errors or warnings" "$T/lint.log" "FLOW.md"
+# sq_bad NAME OLD NEW PATTERN: owl_good.md with OLD replaced by NEW must report PATTERN
 sq_bad() {
     rm -rf "$T/flow_bad" "$T/flow_bad.bot"
     cp -r "$T/flow_good" "$T/flow_bad"
     python3 -c 'import sys;p=sys.argv[1];s=open(p).read();assert sys.argv[2] in s;open(p,"w").write(s.replace(sys.argv[2],sys.argv[3],1))' \
-        "$T/flow_bad/SQNC.md" "$2" "$3"
+        "$T/flow_bad/FLOW.md" "$2" "$3"
     "$PACK" build "$T/flow_bad" "$CORE" "$T/flow_bad.bot" >"$T/lint.log" 2>&1
-    check "Sqnc: $1" "$T/lint.log" "$4"
+    check "Owl: $1" "$T/lint.log" "$4"
 }
-sq_bad "keyword typo is an error with its line" 'INVOKE SKILL' 'INVOCATE SKILL' 'SQNC.md:15: error: unknown keyword INVOCATE; did you mean INVOKE'
-if [ -e "$T/flow_bad.bot" ]; then fail "Sqnc: a flow with errors is not built"; else pass "Sqnc: a flow with errors is not built"; fi
+sq_bad "keyword typo is an error with its line" 'INVOKE SKILL' 'INVOCATE SKILL' 'FLOW.md:15: error: unknown keyword INVOCATE; did you mean INVOKE'
+if [ -e "$T/flow_bad.bot" ]; then fail "Owl: a flow with errors is not built"; else pass "Owl: a flow with errors is not built"; fi
 sq_bad "unknown tool" '`fs_read`' '`fs_reed`' 'no such tool'
 sq_bad "skill used without LOAD SKILL" 'LOAD SKILL "pitching"' '' 'add LOAD SKILL "pitching"'
 sq_bad "variable used before it is set" '`folder` }' '`fodler` }' '`fodler` is used before it is set'
@@ -101,19 +101,19 @@ sq_bad "unclosed block" 'END FOR' '' 'this FOR EACH is never closed'
 sq_bad "IF without THEN" '"notes.txt" THEN' '"notes.txt"' 'IF reads: IF <condition> THEN'
 sq_bad "MCP CONNECT is rejected" 'LOAD SKILL "pitching"' 'LOAD SKILL "pitching"
 CONNECT mcp://x AS y' 'CONNECT \(MCP servers\) is not supported'
-sq_bad "the file must start with \`\`\`sqnc" '```sqnc
----' '---' 'starts with ```sqnc on its first line; the frontmatter goes inside the block'
+sq_bad "the file must start with \`\`\`owl" '```owl
+---' '---' 'starts with ```owl on its first line; the frontmatter goes inside the block'
 sq_bad "the block must be closed" 'RETURN "Read " + `files.length` + " files"
 ```' 'RETURN "Read " + `files.length` + " files"' 'never closed: end the file with ```'
 sq_bad "nothing may follow the block" 'RETURN "Read " + `files.length` + " files"
 ```' 'RETURN "Read " + `files.length` + " files"
 ```
 More text' 'nothing may follow the closing ```'
-sq_bad "Markdown step headings are rejected" 'STEP 1: GATHER' '## STEP 1: GATHER' 'write the step label as Sqnc, without #: STEP n: NAME'
+sq_bad "Markdown step headings are rejected" 'STEP 1: GATHER' '## STEP 1: GATHER' 'write the step label as Owl, without #: STEP n: NAME'
 sq_bad "other Markdown is rejected" 'LOAD SKILL "pitching"' '# My flow
-LOAD SKILL "pitching"' 'Markdown \(headings, <!-- comments -->\) is not part of Sqnc'
+LOAD SKILL "pitching"' 'Markdown \(headings, <!-- comments -->\) is not part of Owl'
 sq_bad "STEP labels are numbered in order" 'STEP 2: WORK' 'STEP 3: WORK' 'warning: STEP 3 follows STEP 1'
-sq_bad "decisions written as prose are a warning" 'Skip it.' 'if it is empty, skip it' "SQNC.md:17: warning: write 'if' as a Sqnc statement"
+sq_bad "decisions written as prose are a warning" 'Skip it.' 'if it is empty, skip it' "FLOW.md:17: warning: write 'if' as an Owl statement"
 
 # config.json: checked by the build, shown by list, --version, the start-up line and the system prompt
 mkagent "$T/meta" '{"name": "meta-agent", "display_name": "Meta Agent", "version": "1.2.3", "description": "Tests metadata."}'
@@ -143,6 +143,10 @@ mkagent "$T/cfg_old"
 echo '{}' >"$T/cfg_old/agent.json"
 "$PACK" check "$T/cfg_old" "$CORE" >"$T/build.log" 2>&1
 check "config.json: an old agent.json is reported" "$T/build.log" "agent.json is now config.json"
+mkagent "$T/flow_old"
+printf '```sqnc\nRETURN "x"\n```\n' >"$T/flow_old/SQNC.md"
+"$PACK" check "$T/flow_old" "$CORE" >"$T/build.log" 2>&1
+check "an old SQNC.md is reported" "$T/build.log" "SQNC.md is now FLOW.md"
 # skills / tools lists choose what is compiled in
 mkagent "$T/pick" '{"name": "pick", "version": "1.0.0", "description": "d", "skills": ["keep"], "tools": ["tkeep"], "requires": ["python3"]}'
 mkdir -p "$T/pick/skills/keep" "$T/pick/skills/drop" "$T/pick/tools/bin" "$T/pick/tools/doc"
@@ -173,7 +177,7 @@ shell_call "echo hello-from-tool"
 drive "$T/on.bot" "$T/ws" PATH=/usr/bin:/bin
 check "tool loop: shell_exec runs and its output reaches the LLM" "$T/rec/tool.txt" "hello-from-tool"
 check "online agent: system prompt says internet access" "$T/rec/system.txt" "You have internet access"
-check_not "no SQNC.md: no flow instruction in the system prompt" "$T/rec/system.txt" "driven by its SQNC.md"
+check_not "no FLOW.md: no flow instruction in the system prompt" "$T/rec/system.txt" "driven by its FLOW.md"
 
 shell_call "python3 -c \"import socket;socket.create_connection(('127.0.0.1',$PORT));print('NET-OK')\""
 drive "$T/on.bot" "$T/ws"
@@ -268,13 +272,13 @@ drive "$T/skilled.bot" "$T/ws"
 check "system prompt lists skills with their frontmatter descriptions" "$T/rec/system.txt" "skills/pitching/SKILL.md: Write one specific idea per lead"
 
 mkagent "$T/flowagent"
-cp -r "$T/flow_good/SQNC.md" "$T/flow_good/skills" "$T/flowagent/"
+cp -r "$T/flow_good/FLOW.md" "$T/flow_good/skills" "$T/flowagent/"
 build "$T/flowagent" "$T/flow.bot"
 stub_start --text /dev/null
 (cd "$T/ws" && printf '6\nhttp://127.0.0.1:%s/v1\n\nstub\ngo\nhello after the flow\n/exit\n' "$PORT" |
     timeout 60 "$T/flow.bot" >"$T/out" 2>&1)
-check "SQNC.md present: the flow starts by itself" "$T/out" "Which folder\\?"
-check "SQNC.md present: system prompt explains the [Sqnc] steps" "$T/rec/system.txt" "session is driven by its SQNC.md flow"
+check "FLOW.md present: the flow starts by itself" "$T/out" "Which folder\\?"
+check "FLOW.md present: system prompt explains the [Owl] steps" "$T/rec/system.txt" "session is driven by its FLOW.md flow"
 
 stub_start --text /dev/null
 drive "$T/meta.bot" "$T/ws"
@@ -285,45 +289,45 @@ build "$T/needcmd" "$T/needcmd.bot"
 drive "$T/needcmd.bot" "$T/ws"
 check "config.json requires: missing programs are reported at start" "$T/out" "not installed here: definitely-not-installed-cmd"
 
-# Sqnc interpreter: botcore runs the structure; only prose goes to the LLM
+# Owl interpreter: botcore runs the structure; only prose goes to the LLM
 mkagent "$T/sqagent"
-cp "$TESTS/sqnc_run.md" "$T/sqagent/SQNC.md"
+cp "$TESTS/owl_run.md" "$T/sqagent/FLOW.md"
 build "$T/sqagent" "$T/sq.bot"
 sq_drive() {
     rm -rf "$T/sqws"; mkdir -p "$T/sqws"
     (cd "$T/sqws" && printf '6\nhttp://127.0.0.1:%s/v1\n\nstub\nAlice\n/exit\n' "$PORT" |
         timeout 60 "$T/sq.bot" >"$T/out" 2>&1)
 }
-stub_start --sqnc yes
+stub_start --owl yes
 sq_drive
-check "Sqnc: ASK USER shows the question" "$T/out" "What is your name\\?"
-check "Sqnc: RETURN joins the answer, a prose decision and .length" "$T/out" "Hi Alice, mood happy, 3 items"
-check "Sqnc: STEP headings are shown" "$T/out" "Step 2 · WORK"
-check "Sqnc: EXECUTE runs the tool itself" "$T/out" "Running a command"
-check "Sqnc: RETRY repeats a failing step" "$T/out" "Retrying \\(2 of 2\\)"
-check "Sqnc: SAVE TO FILE writes the value" "$T/sqws/out/items.json" '"b"'
-n=$(grep -c "" "$T/rec/sqnc.txt" 2>/dev/null)
-if [ "$n" = 2 ]; then pass "Sqnc: only prose reaches the LLM (2 calls for the whole flow)"; else fail "Sqnc: only prose reaches the LLM (2 calls for the whole flow)" "LLM calls: $n"; fi
-check "Sqnc: FOR EACH + IF run the plain-English step for the matching item" "$T/rec/sqnc.txt" "line 16\\] Mention the letter"
-check "Sqnc: a prose condition is decided by the LLM" "$T/rec/sqnc.txt" "Decide whether this condition is true right now: the user seems happy"
-stub_start --sqnc no
+check "Owl: ASK USER shows the question" "$T/out" "What is your name\\?"
+check "Owl: RETURN joins the answer, a prose decision and .length" "$T/out" "Hi Alice, mood happy, 3 items"
+check "Owl: STEP headings are shown" "$T/out" "Step 2 · WORK"
+check "Owl: EXECUTE runs the tool itself" "$T/out" "Running a command"
+check "Owl: RETRY repeats a failing step" "$T/out" "Retrying \\(2 of 2\\)"
+check "Owl: SAVE TO FILE writes the value" "$T/sqws/out/items.json" '"b"'
+n=$(grep -c "" "$T/rec/owl.txt" 2>/dev/null)
+if [ "$n" = 2 ]; then pass "Owl: only prose reaches the LLM (2 calls for the whole flow)"; else fail "Owl: only prose reaches the LLM (2 calls for the whole flow)" "LLM calls: $n"; fi
+check "Owl: FOR EACH + IF run the plain-English step for the matching item" "$T/rec/owl.txt" "line 16\\] Mention the letter"
+check "Owl: a prose condition is decided by the LLM" "$T/rec/owl.txt" "Decide whether this condition is true right now: the user seems happy"
+stub_start --owl no
 sq_drive
-check "Sqnc: the LLM's 'no' takes the ELSE branch" "$T/out" "Hi Alice, mood sad"
+check "Owl: the LLM's 'no' takes the ELSE branch" "$T/out" "Hi Alice, mood sad"
 
-# sqnc_review: the LLM's logic check of a project's SQNC.md (builder agents only)
+# owl_review: the LLM's logic check of a project's FLOW.md (builder agents only)
 mkagent "$T/builder" '{"builder": true}'
 build "$T/builder" "$T/builder.bot"
 mkdir -p "$T/revws"
-cp "$TESTS/sqnc_run.md" "$T/revws/SQNC.md"
+cp "$TESTS/owl_run.md" "$T/revws/FLOW.md"
 echo "An agent that greets people." >"$T/revws/agent.md"
-tool_call sqnc_review '{}'
+tool_call owl_review '{}'
 drive "$T/builder.bot" "$T/revws"
-check "sqnc_review: the verdict reaches the agent" "$T/rec/tool.txt" '"makes_sense":false'
-check "sqnc_review: the report says why and what to do instead" "$T/rec/tool.txt" "why: reads a file that is never written"
-check "sqnc_review: the reviewer gets SQNC.md with line numbers and agent.md" "$T/rec/review.txt" "An agent that greets people"
-tool_call sqnc_review '{}'
+check "owl_review: the verdict reaches the agent" "$T/rec/tool.txt" '"makes_sense":false'
+check "owl_review: the report says why and what to do instead" "$T/rec/tool.txt" "why: reads a file that is never written"
+check "owl_review: the reviewer gets FLOW.md with line numbers and agent.md" "$T/rec/review.txt" "An agent that greets people"
+tool_call owl_review '{}'
 drive "$T/on.bot" "$T/revws"
-check "sqnc_review: not available to ordinary agents" "$T/rec/tool.txt" "unknown tool 'sqnc_review'"
+check "owl_review: not available to ordinary agents" "$T/rec/tool.txt" "unknown tool 'owl_review'"
 
 shell_call "echo no-curl-needed"
 drive "$T/on.bot" "$T/ws" PATH=/nonexistent
@@ -429,7 +433,7 @@ if command -v tmux >/dev/null 2>&1; then
     check "Ctrl-C cancels an in-flight LLM request within a second" "$T/tmux.txt" "\\(interrupted\\)"
 
     # Botter's TUI: its flow asks first; the first message answers it, later ones are chat tagged [N]
-    stub_start --sqnc yes
+    stub_start --owl yes
     tmux new-session -d -s botter-test -x 100 -y 30 -c "$T/ws" "env BOTTER_THEME=dark $BOTTER"
     sleep 0.8
     for k in 6 Enter "http://127.0.0.1:$PORT/v1" Enter Enter stub Enter; do
@@ -447,10 +451,10 @@ if command -v tmux >/dev/null 2>&1; then
     check "TUI: the model is told what the numbers mean" "$T/rec/system.txt" "numbers each user message and your reply"
     check_not "TUI: header is gone after the first message" "$T/tui.txt" "the agent that builds agents"
     if head -4 "$T/tui.txt" | grep -q "What agent should I build"; then pass "TUI: the flow's question stays at the top when the header goes"; else fail "TUI: the flow's question stays at the top when the header goes"; fi
-    check "TUI: the first message answered the flow" "$T/rec/sqnc.txt" "Answer the question"
+    check "TUI: the first message answered the flow" "$T/rec/owl.txt" "Answer the question"
 
     # TUI after a tool call: streamed reply shown once, tool internals hidden
-    stub_start --sqnc yes --tool shell_exec --args '{"command":"echo hi"}'
+    stub_start --owl yes --tool shell_exec --args '{"command":"echo hi"}'
     tmux new-session -d -s botter-test -x 100 -y 30 -c "$T/ws" "env BOTTER_THEME=dark $BOTTER"
     sleep 0.8
     for k in 6 Enter "http://127.0.0.1:$PORT/v1" Enter Enter stub Enter; do

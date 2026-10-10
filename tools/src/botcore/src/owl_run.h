@@ -1,10 +1,10 @@
-#ifndef BC_SQNC_RUN_H
-#define BC_SQNC_RUN_H
+#ifndef BC_OWL_RUN_H
+#define BC_OWL_RUN_H
 
-#include "sqnc.h"
+#include "owl.h"
 
 /*
- * The Sqnc interpreter: runs an agent's SQNC.md statement by statement.
+ * The Owl interpreter: runs an agent's FLOW.md statement by statement.
  * Structure is executed by botcore itself (variables, IF/FOR/WHILE/RETRY,
  * EXECUTE tool, ASK USER, SAVE, comparisons such as IS EQUAL TO); the LLM is
  * used only where a statement needs judgement: plain-English instructions,
@@ -29,6 +29,6 @@ typedef struct {
 #define SQ_DONE    0 /* ran to the end or RETURN */
 #define SQ_ABORTED 1 /* the user interrupted or quit */
 
-int sqnc_run(sq_prog *prog, sq_io *io);
+int owl_run(sq_prog *prog, sq_io *io);
 
 #endif

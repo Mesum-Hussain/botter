@@ -1,14 +1,14 @@
-#ifndef BC_SQNC_H
-#define BC_SQNC_H
+#ifndef BC_OWL_H
+#define BC_OWL_H
 
 #include <stddef.h>
 
 /*
- * Sqnc ("sequence"): the language of an agent's SQNC.md. The whole file is
- * one ```sqnc block: a frontmatter (spec-version: "sqnc-1"), then UPPERCASE
+ * Owl ("sequence"): the language of an agent's FLOW.md. The whole file is
+ * one ```owl block: a frontmatter (spec-version: "owl-1"), then UPPERCASE
  * statements; every other line is a plain-English instruction (no Markdown). This file is the shared front end:
  * sq_parse() builds the syntax tree (syntax errors), sq_check() checks names
- * and variables (botter_pack, at build time), sqnc_run.c interprets the tree
+ * and variables (botter_pack, at build time), owl_run.c interprets the tree
  * (botcore, at run time). No dependencies beyond libc.
  */
 
@@ -64,7 +64,7 @@ typedef struct {
     void *ud;
 } sq_prog;
 
-/* Parse SQNC.md text. Syntax errors go to p->diag; returns the error count. */
+/* Parse FLOW.md text. Syntax errors go to p->diag; returns the error count. */
 int  sq_parse(const char *src, size_t n, sq_prog *p);
 void sq_free(sq_prog *p);
 

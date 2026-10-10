@@ -30,7 +30,7 @@ extern const tool_t TOOLS_CRON[];
 extern const size_t TOOLS_CRON_N;
 extern const tool_t TOOLS_VFS[]; /* registered only when an agent pack is linked */
 extern const size_t TOOLS_VFS_N;
-extern const tool_t TOOLS_REVIEW[]; /* sqnc_review: builder agents only (tools_enable_review) */
+extern const tool_t TOOLS_REVIEW[]; /* owl_review: builder agents only (tools_enable_review) */
 extern const size_t TOOLS_REVIEW_N;
 void tools_enable_review(int on);
 

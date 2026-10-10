@@ -7,7 +7,7 @@ You write an agent the way you write a program: source files in a folder, under 
 ```
 myagent/                         ./botter                  myagent.bot
   agent.md       who it is                                 one static x86-64
-  SQNC.md        what it does, step by step   ─────────▶   Linux executable,
+  FLOW.md        what it does, step by step   ─────────▶   Linux executable,
   skills/        how to do each task                       ~360 KB, no install,
   tools/         small programs it can run                 no runtime, no deps
 ```
@@ -36,7 +36,7 @@ An agent is a folder of plain-text files. Botter writes them with you, and you c
 | File | What it is | Who writes it |
 |---|---|---|
 | `agent.md` | The agent's persona and rules: who it is, what it may and may not do | Anyone (English) |
-| `SQNC.md` | The session, step by step, in **Sqnc** | Anyone (structured English) |
+| `FLOW.md` | The session, step by step, in **Owl** | Anyone (structured English) |
 | `skills/<name>/SKILL.md` | Playbooks: how to do one task well | Anyone (English) |
 | `tools/bin/<name>` + `tools/doc/<name>.json` | Small programs the agent can run, and their description | A little code |
 | `config.json` | How Botter builds and runs it: name, version, internet on/off, which skills and tools go in | Botter (you can edit it) |
@@ -82,14 +82,14 @@ description: Write one specific, non-generic idea per lead. Read before writing 
 
 At start-up, botcore lists every skill's name and description to the model, but not the full text. The model reads a skill only when the task calls for it, so an agent can carry dozens of playbooks without filling its context. This is the `SKILL.md` convention popularized by Agent Skills, and a skill is just a file: copy it between agents, or keep a shared library of them in git.
 
-### Sqnc: the flow, in structured English
+### Owl: the flow, in structured English
 
-`SQNC.md` is the agent's program: the order of steps, the decisions and the loops. It is written in **Sqnc** (say "sequence"): plain English for the steps, CAPITALS for the structure, and nothing else. The whole file is one ` ```sqnc ` block, with no Markdown in it (`STEP 1: GATHER`, not `## STEP 1`), so every line is either a Sqnc statement or an instruction for the agent.
+`FLOW.md` is the agent's program: the order of steps, the decisions and the loops. It is written in **Owl** (Orchestration Writeup Language): plain English for the steps, CAPITALS for the structure, and nothing else. The whole file is one ` ```owl ` block, with no Markdown in it (`STEP 1: GATHER`, not `## STEP 1`), so every line is either an Owl statement or an instruction for the agent.
 
 ````markdown
-```sqnc
+```owl
 ---
-spec-version: "sqnc-1"
+spec-version: "owl-1"
 title: "Lead Outreach"
 description: "Find businesses that need the user's service and pitch each one, with the user's approval."
 ---
@@ -131,18 +131,18 @@ Statements: `STEP n: NAME` (labels), `LOAD SKILL`, `EXECUTE tool`, `INVOKE SKILL
 
 #### Compiled
 
-The build checks `SQNC.md` like a compiler front end, and refuses to build a broken flow. Real messages, from breaking the example above:
+The build checks `FLOW.md` like a compiler front end, and refuses to build a broken flow. Real messages, from breaking the example above:
 
 ```
-SQNC.md:22: error: unknown keyword INVOCATE; did you mean INVOKE?
-SQNC.md:26: error: EXECUTE tool `send_mail`: no such tool (built-in, or tools/bin/send_mail with tools/doc/send_mail.json)
-SQNC.md:28: error: `pich` is used before it is set (SAVE ... INTO VARIABLE `pich`, SET `pich` TO ..., or FOR EACH `pich` IN ...)
-SQNC.md:31: error: END FOR, but the IF opened on line 25 is still open (close it with END IF first)
-SQNC.md:35: error: `lead` only exists inside its FOR EACH loop
-SQNC.md:20: error: write the step label as Sqnc, without #: STEP n: NAME
+FLOW.md:22: error: unknown keyword INVOCATE; did you mean INVOKE?
+FLOW.md:26: error: EXECUTE tool `send_mail`: no such tool (built-in, or tools/bin/send_mail with tools/doc/send_mail.json)
+FLOW.md:28: error: `pich` is used before it is set (SAVE ... INTO VARIABLE `pich`, SET `pich` TO ..., or FOR EACH `pich` IN ...)
+FLOW.md:31: error: END FOR, but the IF opened on line 25 is still open (close it with END IF first)
+FLOW.md:35: error: `lead` only exists inside its FOR EACH loop
+FLOW.md:20: error: write the step label as Owl, without #: STEP n: NAME
 ```
 
-It checks the file's shape (one ` ```sqnc ` block, no Markdown), matched blocks, tools and skills that really exist, variables set before use (and loop variables not used after their loop), quoting, bounded retries, and keyword typos.
+It checks the file's shape (one ` ```owl ` block, no Markdown), matched blocks, tools and skills that really exist, variables set before use (and loop variables not used after their loop), quoting, bounded retries, and keyword typos.
 
 #### Reviewed by an LLM
 
@@ -150,9 +150,9 @@ Correct syntax isn't the same as sense. Before building, Botter has your connect
 
 #### Interpreted, with the LLM only where it's needed
 
-At run time botcore's **Sqnc interpreter** runs the flow statement by statement, the moment the agent starts. Everything with an exact meaning runs in botcore itself, with no model involved: tool calls, questions to the user, variables, loops, retries, comparisons (`IS EQUAL TO`, `CONTAINS`, `IS EMPTY` ...) and files. The LLM is called only for what needs judgement: plain-English steps, skills, and conditions or values written in prose (`IF the user asked for changes THEN`). In the test suite, a flow with a question, a tool call, a loop, a branch, a retry, a file write and a reply made **2 LLM calls** in total. That makes flows cheaper, faster and predictable, and the model can't skip a step or wander off.
+At run time botcore's **Owl interpreter** runs the flow statement by statement, the moment the agent starts. Everything with an exact meaning runs in botcore itself, with no model involved: tool calls, questions to the user, variables, loops, retries, comparisons (`IS EQUAL TO`, `CONTAINS`, `IS EMPTY` ...) and files. The LLM is called only for what needs judgement: plain-English steps, skills, and conditions or values written in prose (`IF the user asked for changes THEN`). In the test suite, a flow with a question, a tool call, a loop, a branch, a retry, a file write and a reply made **2 LLM calls** in total. That makes flows cheaper, faster and predictable, and the model can't skip a step or wander off.
 
-How Sqnc compares: other agent-workflow languages exist, but none take this shape. [PDL](https://arxiv.org/abs/2410.19135) (IBM) is YAML, [POML](https://arxiv.org/abs/2508.13948) (Microsoft) is HTML-like markup for prompts, [BWML](https://cdn.jsdelivr.net/npm/bmad-plus@0.9.0/src/bmad-plus/packs/pack-dev-studio/shared/bwml-spec.md) is XML, [SudoLang](https://github.com/paralleldrive/sudolang-llm-support) is free-form pseudocode, and [GitHub Agentic Workflows](https://github.github.com/gh-aw/introduction/overview/) are prose without checked control flow. Sqnc is English with keywords: compiled, reviewed for logic, and interpreted, with the LLM used only where English has to be understood.
+How Owl compares: other agent-workflow languages exist, but none take this shape. [PDL](https://arxiv.org/abs/2410.19135) (IBM) is YAML, [POML](https://arxiv.org/abs/2508.13948) (Microsoft) is HTML-like markup for prompts, [BWML](https://cdn.jsdelivr.net/npm/bmad-plus@0.9.0/src/bmad-plus/packs/pack-dev-studio/shared/bwml-spec.md) is XML, [SudoLang](https://github.com/paralleldrive/sudolang-llm-support) is free-form pseudocode, and [GitHub Agentic Workflows](https://github.github.com/gh-aw/introduction/overview/) are prose without checked control flow. Owl is English with keywords: compiled, reviewed for logic, and interpreted, with the LLM used only where English has to be understood.
 
 ### Tools: when English is not enough
 
@@ -171,9 +171,9 @@ Users never see tool names or JSON. They see `status`, for example "Searching fo
 
 ## The build
 
-`botter_pack` (which Botter runs through its `agent_build` tool) validates the project, checks `SQNC.md`, and appends the files read-only to **botcore**, the runtime. No compiler or linker runs, and nothing is generated: the result runs exactly the files you wrote. The `.bot` file is botcore plus your Markdown and tools, with a checksum, so a truncated or modified file refuses to start.
+`botter_pack` (which Botter runs through its `agent_build` tool) validates the project, checks `FLOW.md`, and appends the files read-only to **botcore**, the runtime. No compiler or linker runs, and nothing is generated: the result runs exactly the files you wrote. The `.bot` file is botcore plus your Markdown and tools, with a checksum, so a truncated or modified file refuses to start.
 
-**botcore** is the runtime every agent runs on, Botter included. It is about 9,000 lines of C11 of its own, statically linked against musl. It contains the Sqnc parser and interpreter, in-process HTTPS (vendored BearSSL, compiled-in CA roots: no curl, no OpenSSL, no system certificates), an OpenAI-compatible chat client with streaming and tool calling, file, shell and scheduling tools, and a kernel-enforced sandbox.
+**botcore** is the runtime every agent runs on, Botter included. It is about 9,000 lines of C11 of its own, statically linked against musl. It contains the Owl parser and interpreter, in-process HTTPS (vendored BearSSL, compiled-in CA roots: no curl, no OpenSSL, no system certificates), an OpenAI-compatible chat client with streaming and tool calling, file, shell and scheduling tools, and a kernel-enforced sandbox.
 
 ## Small and fast
 
@@ -210,17 +210,17 @@ The reference rows are the bare interpreters, before any agent framework is even
 - `/provider` switches provider, key or model mid-conversation (the conversation is kept), and `/forget` drops saved keys
 - `/plan`, `/build` or **Tab** switch modes, ctrl+o shows details, and `/help` lists the commands
 - Replies stream as they are written; the model's thinking is shown separately and folded away
-- An agent with a `SQNC.md` starts its flow by itself; when it ends you can keep chatting, and `/run` starts it again
+- An agent with a `FLOW.md` starts its flow by itself; when it ends you can keep chatting, and `/run` starts it again
 
 ## Development
 
 ```sh
-make test                     # 114 tests: Sqnc compiler + interpreter + review, config.json, sandbox, streaming, key cache, Plan mode, HTTP, TUI
+make test                     # 114 tests: Owl compiler + interpreter + review, config.json, sandbox, streaming, key cache, Plan mode, HTTP, TUI
 BOTTER_TEST_NET=1 make test   # adds real providers and TLS failure cases
 make dist                     # dist/botter-<version>-linux-x86_64.tar.gz + .sha256
 ```
 
-Layout: `tools/src/botcore` (runtime, C11), `tools/src/botcore/src/sqnc*.c` (Sqnc parser, checks and interpreter), `tools/src/pack` (packer), `tools/src/agent_tools` (Botter's own tools), `tui/` (Botter's full-screen UI; agents it builds use a plain terminal REPL), `agent.md` + `SQNC.md` + `skills/` (Botter itself is an agent project, built by the same compiler and run by the same interpreter), `tests/`. Design notes: `progress.md`.
+Layout: `tools/src/botcore` (runtime, C11), `tools/src/botcore/src/owl*.c` (Owl parser, checks and interpreter), `tools/src/pack` (packer), `tools/src/agent_tools` (Botter's own tools), `tui/` (Botter's full-screen UI; agents it builds use a plain terminal REPL), `agent.md` + `FLOW.md` + `skills/` (Botter itself is an agent project, built by the same compiler and run by the same interpreter), `tests/`. Design notes: `progress.md`.
 
 ## License
 

@@ -1,6 +1,6 @@
-```sqnc
+```owl
 ---
-spec-version: "sqnc-1"
+spec-version: "owl-1"
 title: "Botter Session"
 description: "Design an agent with the user, write its files, check them and build them into one .bot file."
 ---
@@ -23,7 +23,7 @@ STEP 1: UNDERSTAND
 4. EXECUTE tool `fs_list` with payload { "path": "." }
 5. SAVE result INTO VARIABLE `existing`
 6. IF `existing` CONTAINS "config.json" OR `existing` CONTAINS "agent.md" THEN
-       Read config.json, agent.md, SQNC.md and the skills in this folder, and say in two sentences what this agent does now and which version it is.
+       Read config.json, agent.md, FLOW.md and the skills in this folder, and say in two sentences what this agent does now and which version it is.
    END IF
 7. SET `questions` TO one short message with at most 3 questions about purpose, users, limits and existing code that `request` leaves open, each with a proposed default, or "" if nothing important is unclear
 8. IF `questions` IS NOT EMPTY THEN
@@ -76,13 +76,13 @@ STEP 4: CHECK
        RETURN "the errors that remain in `check` and what the user can do about them"
    END IF
 6. EXECUTE tool `fs_list` with payload { "path": "." }
-7. IF `result` CONTAINS "SQNC.md" THEN
-       EXECUTE tool `sqnc_review` with payload { "dir": "." }
+7. IF `result` CONTAINS "FLOW.md" THEN
+       EXECUTE tool `owl_review` with payload { "dir": "." }
        SAVE result INTO VARIABLE `review`
        IF `review.makes_sense` IS EQUAL TO false THEN
-           ASK USER "Some steps in SQNC.md do not make sense yet:\n\n" + `review.report` + "\nShall I apply these suggestions?"
+           ASK USER "Some steps in FLOW.md do not make sense yet:\n\n" + `review.report` + "\nShall I apply these suggestions?"
            IF `answer` is an approval THEN
-               Apply the suggestions in `review` to SQNC.md.
+               Apply the suggestions in `review` to FLOW.md.
                EXECUTE tool `agent_build` with payload { "dry_run": true }
            END IF
        END IF

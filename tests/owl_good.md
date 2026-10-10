@@ -1,6 +1,6 @@
-```sqnc
+```owl
 ---
-spec-version: "sqnc-1"
+spec-version: "owl-1"
 title: "Test Flow"
 ---
 LOAD SKILL "pitching"

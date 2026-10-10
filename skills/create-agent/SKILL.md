@@ -23,7 +23,7 @@ Follow these steps in order. Keep the conversation short.
 
 5. Only if the agent really needs capabilities that shell commands and file tools cannot give (a special parser, a calculation, a local program, network access), add tools. Read skills/write-tool/SKILL.md. Prefer a script tool over a compiled one unless the user wants a native binary. The agent's own LLM does the thinking (analysing, writing, deciding, replying); tools only do I/O and computation. Do not write a tool that calls an LLM or orchestrates the whole job in a script: put the workflow in a skill and let the agent run it step by step.
 
-6. If the agent has more than one step, write SQNC.md: the session flow in Sqnc, naming the agent's skills and tools exactly (read skills/write-flow/SKILL.md).
+6. If the agent has more than one step, write FLOW.md: the session flow in Owl, naming the agent's skills and tools exactly (read skills/write-flow/SKILL.md).
 
 7. Build: read skills/build-agent/SKILL.md. Run agent_build with dry_run=true, fix all errors, then agent_build, then agent_inspect.
 
